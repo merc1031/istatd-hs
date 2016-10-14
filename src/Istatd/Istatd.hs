@@ -2,7 +2,8 @@
 {-# LANGUAGE ViewPatterns #-}
 module Istatd.Istatd
 ( IstatInChan
-, Rec (..)
+, IstatdDatum (..)
+, IstatdType (..)
 , mkFilterPipeline
 , mkBuffer
 , mkFilterPrefix
@@ -11,6 +12,8 @@ module Istatd.Istatd
 , mkSlowdownBuffer
 , mkNullRecorder
 , mkPrintingRecorder
+, mkPrintingEncodedRecorder
+, mkIstatdRecorder
 , iWriteChan
 )
 where
@@ -28,11 +31,18 @@ import            Control.Monad.Catch             ( MonadCatch )
 import            Control.Monad.IO.Class          ( MonadIO
                                                   , liftIO
                                                   )
-import            Istatd.Types                    ( Rec(..)
+import            Data.Monoid                     ( (<>) )
+import            Istatd.Client                   ( IstatdConfig (..)
+                                                  , connect
+                                                  , send
+                                                  )
+import            Istatd.Types                    ( IstatdDatum(..)
+                                                  , IstatdType (..)
                                                   , IstatInChan
                                                   , FilterFunc
                                                   , updateKey
                                                   , getKey
+                                                  , toPacket
                                                   )
 import            Istatd.Tick                     ( tick )
 import            Istatd.Chan                     ( newZChan
@@ -44,7 +54,8 @@ import            Istatd.Chan                     ( newZChan
 import            Istatd.Control.Monad            ( (<<) )
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
-import qualified  Data.Text.Lazy                  as TL
+import qualified  Data.ByteString.Lazy.Builder    as BSLB
+import qualified  Data.Time.Clock.POSIX           as POSIX
 
 
 
@@ -55,26 +66,28 @@ mkFilterPipeline :: (MonadIO m)
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
 mkFilterPrefix :: (MonadIO m)
-               => TL.Text
+               => BSLB.Builder
                -> FilterFunc m
 mkFilterPrefix prefix = \out -> do
     (inC, outC) <- newZChan
-    let action r@(getKey -> k) = let nk = TL.append prefix k
+    let action r@(getKey -> k) = let nk = prefix <> k
                                  in iWriteChan out $ updateKey nk r
     liftIO $ void $ async $ forever $ action =<< iReadChan outC
     return inC
 
 mkFilterSuffix :: (MonadIO m)
-               => TL.Text
+               => BSLB.Builder
                -> FilterFunc m
 mkFilterSuffix suffix = \out -> do
     (inC, outC) <- newZChan
-    let action r@(getKey -> k) = let nk = TL.append k suffix
+    let action r@(getKey -> k) = let nk = k <> suffix
                                  in iWriteChan out $ updateKey nk r
     liftIO $ void $ async $ forever $ action =<< iReadChan outC
     return inC
 
-mkBuffer :: (MonadCatch m, MonadIO m)
+mkBuffer :: ( MonadCatch m
+            , MonadIO m
+            )
          => Int
          -> FilterFunc m
 mkBuffer size = \out -> do
@@ -83,20 +96,29 @@ mkBuffer size = \out -> do
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Buffer died" >> return ()
     return inC
 
-mkMonitoredBuffer :: (MonadCatch m, MonadIO m)
-                  => TL.Text
+mkMonitoredBuffer :: ( MonadCatch m
+                     , MonadIO m
+                     )
+                  => BSLB.Builder
                   -> Int
                   -> FilterFunc m
 mkMonitoredBuffer name size = \out -> do
     (inC, outC) <- newBChan size
     let action = liftIO $ void $ async $ forever $ iWriteChan out =<< (iReadChan outC)
     ticker <- tick 1
-    let recordAction = liftIO $ void $ async $ forever $ U.readChan ticker >> ((\c'' -> (iWriteChan out $ Gauge name 1 (fromIntegral c''))) =<< iInChanLen inC)
+    let recordAction =
+            let channelAction =
+                    let datum len t = IstatdDatum Gauge name t (fromIntegral len)
+                        writeAction len = iWriteChan out . datum len =<< POSIX.getPOSIXTime
+                    in U.readChan ticker >> (writeAction =<< iInChanLen inC)
+            in liftIO $ void $ async $ forever $ channelAction
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "MonitoredBuffer died" >> return ()
     recordAction
     return inC
 
-mkSlowdownBuffer :: (MonadCatch m, MonadIO m)
+mkSlowdownBuffer :: ( MonadCatch m
+                    , MonadIO m
+                    )
                  => Int
                  -> Int
                  -> FilterFunc m
@@ -106,7 +128,9 @@ mkSlowdownBuffer time size = \out -> do
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "MonitoredBuffer died" >> return ()
     return inC
 
-mkNullRecorder :: (MonadCatch m, MonadIO m)
+mkNullRecorder :: ( MonadCatch m
+                  , MonadIO m
+                  )
                => m IstatInChan
 mkNullRecorder = do
     (inC, outC) <- newZChan
@@ -114,13 +138,40 @@ mkNullRecorder = do
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
-mkPrintingRecorder :: (MonadCatch m, MonadIO m)
+mkPrintingRecorder :: ( MonadCatch m
+                      , MonadIO m
+                      )
                    => m IstatInChan
 mkPrintingRecorder = do
     (inC, outC) <- newZChan
     let action = liftIO $ void $ async $ forever $ putStrLn . show =<< iReadChan outC
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
     return inC
+
+mkPrintingEncodedRecorder :: ( MonadCatch m
+                             , MonadIO m
+                             )
+                          => m IstatInChan
+mkPrintingEncodedRecorder = do
+    (inC, outC) <- newZChan
+    let action = liftIO $ void $ async $ forever $ putStrLn . show . toPacket =<< iReadChan outC
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    return inC
+
+mkIstatdRecorder :: ( MonadCatch m
+                    , MonadIO m
+                    )
+                 => IstatdConfig
+                 -> m IstatInChan
+mkIstatdRecorder config = do
+    (inC, outC) <- newZChan
+    connection <- connect config
+    let send' p = send connection [p]
+    let action = liftIO $ void $ async $ forever $ send' =<< iReadChan outC
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    return inC
+
+
 
 putStrLnIO :: (MonadIO m)
            => String -> m ()
