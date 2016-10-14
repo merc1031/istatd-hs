@@ -15,10 +15,16 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     Lib
-                     , Istatd
+  ghc-options:         -Wall -Werror
+  ghc-options:         -O2
+  exposed-modules:     Istatd.Istatd
+                     , Istatd.Chan
+                     , Istatd.Tick
+                     , Istatd.Types
+                     , Istatd.Control.Monad
   build-depends:       base >= 4.7 && < 5
                      , auto-update
+                     , exceptions
                      , stm
                      , stm-chans
                      , unagi-chan
@@ -32,6 +38,8 @@ executable istatd-hs-exe
   hs-source-dirs:      app
   main-is:             Main.hs
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  ghc-options:         -Wall -Werror
+  ghc-options:         -O2
   build-depends:       base
                      , istatd-hs
   default-language:    Haskell2010

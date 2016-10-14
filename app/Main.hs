@@ -1,9 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Main where
 
-import Control.Monad (forever)
-import Control.Concurrent (threadDelay)
-import Istatd
+import Control.Concurrent           (threadDelay)
+import Control.Monad                (forever)
+import Istatd.Istatd
 
 main :: IO ()
 main = do
