@@ -18,7 +18,9 @@ library
   ghc-options:         -Wall -Werror
   ghc-options:         -O2
   exposed-modules:     Istatd.Istatd
-                     , Istatd.Chan
+                     , Istatd.Chan.Chan
+                     , Istatd.Chan.ChanT
+                     , Istatd.Chan.ChanLike
                      , Istatd.Client
                      , Istatd.Tick
                      , Istatd.Types
@@ -66,6 +68,7 @@ benchmark istatd-hs-benchmark
   main-is:             Benchmarks.hs
   build-depends:       base
                      , istatd-hs
+                     , deepseq
                      , time
                      , criterion
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N

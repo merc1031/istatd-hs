@@ -1,25 +1,38 @@
 {-# LANGUAGE BangPatterns #-}
-module Istatd.Chan where
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+module Istatd.Chan.ChanT where
 
 import            Control.Arrow                           ( (***) )
+import            Control.Concurrent.STM                  ( TVar
+                                                          , modifyTVar'
+                                                          , atomically
+                                                          , newTVarIO
+                                                          , readTVarIO
+                                                          )
 import            Control.Monad                           ( void )
 import            Control.Monad.IO.Class                  ( MonadIO
                                                           , liftIO
                                                           )
-import            Data.IORef                              ( IORef
-                                                          , atomicModifyIORef'
-                                                          , newIORef
-                                                          )
 import            Control.DeepSeq                         ( NFData (..) )
+import            Istatd.Chan.ChanLike                    ( ChanLike (..) )
 
 import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU
 
+instance ChanLike InChanI OutChanI a where
+  clNewZChan = newZChan
+  clNewBChan = newBChan
+  clWriteChan = iWriteChan
+  clReadChan = iReadChan
+  clInChanLen = iInChanLen
+  clOutChanLen = iOutChanLen
+
 data InChanI a = ZInChan (U.InChan a)
-               | BInChan (IORef Int) (BU.InChan a)
+               | BInChan (TVar Int) (BU.InChan a)
 
 data OutChanI a = ZOutChan (U.OutChan a)
-                | BOutChan (IORef Int) (BU.OutChan a)
+                | BOutChan (TVar Int) (BU.OutChan a)
 
 instance NFData (InChanI a) where
   rnf (ZInChan !_chan) = ()
@@ -36,7 +49,7 @@ iWriteChan :: MonadIO m
 iWriteChan (ZInChan uchan) r =
   liftIO $ U.writeChan uchan r
 iWriteChan (BInChan c buchan) r =
-  liftIO $ BU.writeChan buchan r >> (void $ atomicModifyIORef' c (\c' -> (c' + 1, ())))
+  liftIO $ BU.writeChan buchan r >> (void $ atomically $ modifyTVar' c (\c' -> c' + 1))
 
 iReadChan :: (MonadIO m)
           => OutChanI a
@@ -44,7 +57,7 @@ iReadChan :: (MonadIO m)
 iReadChan (ZOutChan uchan) =
   liftIO $ U.readChan uchan
 iReadChan (BOutChan c buchan) =
-  liftIO $ BU.readChan buchan >>= \r -> (void $ atomicModifyIORef' c (\c' -> (c' - 1, ()))) >> return r
+  liftIO $ BU.readChan buchan >>= \r -> (void $ atomically $ modifyTVar' c (\c' -> c' - 1)) >> return r
 
 iOutChanLen :: (MonadIO m)
             => OutChanI a
@@ -52,7 +65,7 @@ iOutChanLen :: (MonadIO m)
 iOutChanLen (ZOutChan {}) =
   return 0
 iOutChanLen (BOutChan c _) =
-  liftIO $ atomicModifyIORef' c (\c' -> (c', c'))
+  liftIO $ readTVarIO c
 
 iInChanLen :: (MonadIO m)
            => InChanI a
@@ -60,7 +73,7 @@ iInChanLen :: (MonadIO m)
 iInChanLen (ZInChan {}) =
   return 0
 iInChanLen (BInChan c _) =
-  liftIO $ atomicModifyIORef' c (\c' -> (c', c'))
+  liftIO $ readTVarIO c
 
 newZChan :: (MonadIO m)
          => m (InChanI a, OutChanI a)
@@ -71,5 +84,5 @@ newBChan :: (MonadIO m)
          => Int
          -> m (InChanI a, OutChanI a)
 newBChan size = do
-  c <- liftIO $ newIORef 0
+  c <- liftIO $ newTVarIO 0
   (BInChan c *** BOutChan c) <$> (liftIO $ BU.newChan size)

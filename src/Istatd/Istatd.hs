@@ -1,7 +1,8 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 module Istatd.Istatd
-( IstatInChan
+( ChanLike (..)
 , IstatdDatum (..)
 , IstatdType (..)
 , mkFilterPipeline
@@ -14,7 +15,6 @@ module Istatd.Istatd
 , mkPrintingRecorder
 , mkPrintingEncodedRecorder
 , mkIstatdRecorder
-, iWriteChan
 )
 where
 
@@ -38,19 +38,13 @@ import            Istatd.Client                   ( IstatdConfig (..)
                                                   )
 import            Istatd.Types                    ( IstatdDatum(..)
                                                   , IstatdType (..)
-                                                  , IstatInChan
                                                   , FilterFunc
                                                   , updateKey
                                                   , getKey
                                                   , toPacket
                                                   )
 import            Istatd.Tick                     ( tick )
-import            Istatd.Chan                     ( newZChan
-                                                  , newBChan
-                                                  , iWriteChan
-                                                  , iReadChan
-                                                  , iInChanLen
-                                                  )
+import            Istatd.Chan.ChanLike            ( ChanLike (..) )
 import            Istatd.Control.Monad            ( (<<) )
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
@@ -59,58 +53,61 @@ import qualified  Data.Time.Clock.POSIX           as POSIX
 
 
 
+
 mkFilterPipeline :: (MonadIO m)
-                 => IstatInChan
-                 -> [FilterFunc m]
-                 -> m IstatInChan
+                 => ci IstatdDatum
+                 -> [FilterFunc (ci IstatdDatum) m]
+                 -> m (ci IstatdDatum)
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
-mkFilterPrefix :: (MonadIO m)
+mkFilterPrefix :: (MonadIO m, ChanLike ci ct IstatdDatum)
                => BSLB.Builder
-               -> FilterFunc m
+               -> FilterFunc (ci IstatdDatum) m
 mkFilterPrefix prefix = \out -> do
-    (inC, outC) <- newZChan
+    (inC, outC) <- clNewZChan
     let action r@(getKey -> k) = let nk = prefix <> k
-                                 in iWriteChan out $ updateKey nk r
-    liftIO $ void $ async $ forever $ action =<< iReadChan outC
+                                 in clWriteChan out $ updateKey nk r
+    liftIO $ void $ async $ forever $ action =<< clReadChan outC
     return inC
 
-mkFilterSuffix :: (MonadIO m)
+mkFilterSuffix :: (MonadIO m, ChanLike ci ct IstatdDatum)
                => BSLB.Builder
-               -> FilterFunc m
+               -> FilterFunc (ci IstatdDatum) m
 mkFilterSuffix suffix = \out -> do
-    (inC, outC) <- newZChan
+    (inC, outC) <- clNewZChan
     let action r@(getKey -> k) = let nk = k <> suffix
-                                 in iWriteChan out $ updateKey nk r
-    liftIO $ void $ async $ forever $ action =<< iReadChan outC
+                                 in clWriteChan out $ updateKey nk r
+    liftIO $ void $ async $ forever $ action =<< clReadChan outC
     return inC
 
 mkBuffer :: ( MonadCatch m
             , MonadIO m
+            , ChanLike ci ct IstatdDatum
             )
          => Int
-         -> FilterFunc m
+         -> FilterFunc (ci IstatdDatum) m
 mkBuffer size = \out -> do
-    (inC, outC) <- newBChan size
-    let action = liftIO $ void $ async $ forever $ iWriteChan out =<< iReadChan outC
+    (inC, outC) <- clNewBChan size
+    let action = liftIO $ void $ async $ forever $ clWriteChan out =<< clReadChan outC
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Buffer died" >> return ()
     return inC
 
 mkMonitoredBuffer :: ( MonadCatch m
                      , MonadIO m
+                     , ChanLike ci ct IstatdDatum
                      )
                   => BSLB.Builder
                   -> Int
-                  -> FilterFunc m
+                  -> FilterFunc (ci IstatdDatum) m
 mkMonitoredBuffer name size = \out -> do
-    (inC, outC) <- newBChan size
-    let action = liftIO $ void $ async $ forever $ iWriteChan out =<< (iReadChan outC)
+    (inC, outC) <- clNewBChan size
+    let action = liftIO $ void $ async $ forever $ clWriteChan out =<< (clReadChan outC)
     ticker <- tick 1
     let recordAction =
             let channelAction =
                     let datum len t = IstatdDatum Gauge name t (fromIntegral len)
-                        writeAction len = iWriteChan out . datum len =<< POSIX.getPOSIXTime
-                    in U.readChan ticker >> (writeAction =<< iInChanLen inC)
+                        writeAction len = clWriteChan out . datum len =<< POSIX.getPOSIXTime
+                    in U.readChan ticker >> (writeAction =<< clInChanLen inC)
             in liftIO $ void $ async $ forever $ channelAction
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "MonitoredBuffer died" >> return ()
     recordAction
@@ -118,56 +115,61 @@ mkMonitoredBuffer name size = \out -> do
 
 mkSlowdownBuffer :: ( MonadCatch m
                     , MonadIO m
+                    , ChanLike ci ct IstatdDatum
                     )
                  => Int
                  -> Int
-                 -> FilterFunc m
+                 -> FilterFunc (ci IstatdDatum) m
 mkSlowdownBuffer time size = \out -> do
-    (inC, outC) <- newBChan size
-    let action = liftIO $ void $ async $ forever $ iWriteChan out =<< (iReadChan outC << threadDelay time)
+    (inC, outC) <- clNewBChan size
+    let action = liftIO $ void $ async $ forever $ clWriteChan out =<< (clReadChan outC << threadDelay time)
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "MonitoredBuffer died" >> return ()
     return inC
 
 mkNullRecorder :: ( MonadCatch m
                   , MonadIO m
+                  , ChanLike ci ct IstatdDatum
                   )
-               => m IstatInChan
+               => m (ci IstatdDatum)
 mkNullRecorder = do
-    (inC, outC) <- newZChan
-    let action = liftIO $ void $ async $ forever $ void $ iReadChan outC
+    (inC, outC) <- clNewZChan
+    let action = liftIO $ void $ async $ forever $ void $ clReadChan outC
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 mkPrintingRecorder :: ( MonadCatch m
                       , MonadIO m
+                      , ChanLike ci ct IstatdDatum
                       )
-                   => m IstatInChan
+                   => m (ci IstatdDatum)
 mkPrintingRecorder = do
-    (inC, outC) <- newZChan
-    let action = liftIO $ void $ async $ forever $ putStrLn . show =<< iReadChan outC
+    (inC, outC) <- clNewZChan
+    let action = liftIO $ void $ async $ forever $ putStrLn . show =<< clReadChan outC
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 mkPrintingEncodedRecorder :: ( MonadCatch m
                              , MonadIO m
+                             , ChanLike ci ct IstatdDatum
                              )
-                          => m IstatInChan
+                          => m (ci IstatdDatum)
 mkPrintingEncodedRecorder = do
-    (inC, outC) <- newZChan
-    let action = liftIO $ void $ async $ forever $ putStrLn . show . toPacket =<< iReadChan outC
+    (inC, outC) <- clNewZChan
+    let action = liftIO $ void $ async $ forever $ putStrLn . show . toPacket =<< clReadChan outC
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 mkIstatdRecorder :: ( MonadCatch m
                     , MonadIO m
+                    , ChanLike ci ct IstatdDatum
                     )
                  => IstatdConfig
-                 -> m IstatInChan
+                 -> m (ci IstatdDatum)
 mkIstatdRecorder config = do
-    (inC, outC) <- newZChan
+    (inC, outC) <- clNewZChan
     connection <- connect config
     let send' p = send connection [p]
-    let action = liftIO $ void $ async $ forever $ send' =<< iReadChan outC
+    let action = liftIO $ void $ async $ forever $ send' =<< clReadChan outC
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
     return inC
 

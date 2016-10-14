@@ -1,8 +1,6 @@
 module Istatd.Types
 ( IstatdDatum (..)
 , IstatdType (..)
-, IstatInChan
-, IstatOutChan
 , FilterFunc
 , getKey
 , updateKey
@@ -10,9 +8,6 @@ module Istatd.Types
 )
 where
 
-import            Istatd.Chan                         ( InChanI
-                                                      , OutChanI
-                                                      )
 import            Data.Monoid                         ( (<>) )
 
 import qualified  Data.ByteString                     as BS
@@ -21,9 +16,6 @@ import qualified  Data.ByteString.Lazy.Char8          as BSLC
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.Double.Conversion.ByteString   as PrintDouble
 import qualified  Data.Time.Clock.POSIX               as POSIX
-
-type IstatInChan = InChanI IstatdDatum
-type IstatOutChan = OutChanI IstatdDatum
 
 data IstatdType = Counter
                 | Gauge
@@ -69,5 +61,5 @@ updateKey :: BSLB.Builder
           -> IstatdDatum
 updateKey k (IstatdDatum c _k t i) = IstatdDatum c k t i
 
-type FilterFunc m = (IstatInChan -> m IstatInChan)
+type FilterFunc c m = (c -> m c)
 
