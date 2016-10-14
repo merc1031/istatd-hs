@@ -5,7 +5,8 @@ import            Control.Monad                           ( void )
 import            Control.Monad.IO.Class                  ( MonadIO
                                                           , liftIO
                                                           )
-import            Data.IORef                              ( atomicModifyIORef
+import            Data.IORef                              ( IORef
+                                                          , atomicModifyIORef'
                                                           , newIORef
                                                           )
 
