@@ -18,6 +18,7 @@ library
   exposed-modules:     Lib
                      , Istatd
   build-depends:       base >= 4.7 && < 5
+                     , auto-update
                      , stm
                      , stm-chans
                      , unagi-chan

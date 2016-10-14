@@ -1,9 +1,13 @@
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 module Istatd where
 
+import Control.Arrow ((***))
 import Control.Monad (void, forever, (=<<), (>=>))
 import Data.Foldable (foldrM)
+import Data.IORef
+import Control.Debounce (mkDebounce, defaultDebounceSettings, DebounceSettings (..))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Exception.Safe (catch)
@@ -18,16 +22,35 @@ data Rec = Counter TL.Text Int Int
          | Gauge TL.Text Int Double
          deriving (Show)
 
-data IstatChan = ZChan (U.InChan Rec)
-               | BChan (BU.InChan Rec)
+data IstatInChan = ZInChan (U.InChan Rec)
+                 | BInChan (IORef Int) (BU.InChan Rec)
 
-iWriteChan :: IstatChan -> Rec -> IO ()
-iWriteChan (ZChan uchan) r = U.writeChan uchan r
-iWriteChan (BChan buchan) r = BU.writeChan buchan r
+data IstatOutChan = ZOutChan (U.OutChan Rec)
+                  | BOutChan (IORef Int) (BU.OutChan Rec)
 
---iReadChan :: IstatChan -> IO Rec
---iReadChan (ZChan uchan) = U.readChan uchan
---iReadChan (BChan buchan) = BU.readChan buchan
+iWriteChan :: IstatInChan -> Rec -> IO ()
+iWriteChan (ZInChan uchan) r = U.writeChan uchan r
+iWriteChan (BInChan c buchan) r = BU.writeChan buchan r >> (void $ atomicModifyIORef' c (\c' -> (c' + 1, ())))
+
+iReadChan :: IstatOutChan -> IO Rec
+iReadChan (ZOutChan uchan) = U.readChan uchan
+iReadChan (BOutChan c buchan) = BU.readChan buchan >>= \r -> (void $ atomicModifyIORef' c (\c' -> (c' - 1, ()))) >> return r
+
+iOutChanLen :: IstatOutChan -> IO Int
+iOutChanLen (ZOutChan {}) = return 0
+iOutChanLen (BOutChan c _) = atomicModifyIORef' c (\c' -> (c', c'))
+
+iInChanLen :: IstatInChan -> IO Int
+iInChanLen (ZInChan {}) = return 0
+iInChanLen (BInChan c _) = atomicModifyIORef' c (\c' -> (c', c'))
+
+newZChan :: IO (IstatInChan, IstatOutChan)
+newZChan = (ZInChan *** ZOutChan) <$> U.newChan
+
+newBChan :: Int -> IO (IstatInChan, IstatOutChan)
+newBChan size = do
+  c <- newIORef 0
+  (BInChan c *** BOutChan c) <$> BU.newChan size
 
 getKey :: Rec -> TL.Text
 getKey (Counter k _ _) = k
@@ -37,63 +60,63 @@ updateKey :: TL.Text -> Rec -> Rec
 updateKey k (Counter _ t i) = Counter k t i
 updateKey k (Gauge _ t d) = Gauge k t d
 
-type FilterFunc = (IstatChan -> IO IstatChan)
+type FilterFunc = (IstatInChan -> IO IstatInChan)
 
-mkFilterPipeline :: IstatChan -> [FilterFunc] -> IO IstatChan
+mkFilterPipeline :: IstatInChan -> [FilterFunc] -> IO IstatInChan
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
 mkFilterPrefix :: TL.Text -> FilterFunc
 mkFilterPrefix prefix = \out -> do
-    (inC, outC) <- U.newChan
+    (inC, outC) <- newZChan
     let action r@(getKey -> k) = let nk = TL.append prefix k
                                  in iWriteChan out $ updateKey nk r
-    void $ async $ forever $ action =<< U.readChan outC
-    return $ ZChan inC
+    void $ async $ forever $ action =<< iReadChan outC
+    return inC
 
 mkFilterSuffix :: TL.Text -> FilterFunc
 mkFilterSuffix suffix = \out -> do
-    (inC, outC) <- U.newChan
+    (inC, outC) <- newZChan
     let action r@(getKey -> k) = let nk = TL.append k suffix
                                  in iWriteChan out $ updateKey nk r
-    void $ async $ forever $ action =<< U.readChan outC
-    return $ ZChan inC
+    void $ async $ forever $ action =<< iReadChan outC
+    return inC
 
 mkBuffer :: Int -> FilterFunc
 mkBuffer size = \out -> do
-    (inC, outC) <- BU.newChan size
-    let action = void $ async $ forever $ iWriteChan out =<< BU.readChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> return ()
-    return $ BChan inC
+    (inC, outC) <- newBChan size
+    let action = void $ async $ forever $ iWriteChan out =<< iReadChan outC
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLn "Buffer died" >> return ()
+    return inC
 
 mkMonitoredBuffer :: TL.Text -> Int -> FilterFunc
 mkMonitoredBuffer name size = \out -> do
-    (inC, outC) <- BU.newChan size
-    let action = void $ async $ forever $ iWriteChan out =<< BU.readChan outC
-    let recordAction = void $ async $ forever $ (iWriteChan out =<< BU.readChan outC) >> threadDelay 1000000
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> return ()
-    return $ BChan inC
+    (inC, outC) <- newBChan size
+    let action = void $ async $ forever $ iWriteChan out =<< (iReadChan outC)
+    ticker <- tick 1
+    let recordAction = void $ async $ forever $ U.readChan ticker >> ((\c'' -> (iWriteChan out $ Gauge name 1 (fromIntegral c''))) =<< iInChanLen inC)
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLn "MonitoredBuffer died" >> return ()
+    recordAction
+    return inC
 
-mkNullRecorder :: IO IstatChan
+mkNullRecorder :: IO IstatInChan
 mkNullRecorder = do
-    (inC, outC) <- U.newChan
-    let action = void $ async $ forever $ void $ U.readChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> return ()
-    return $ ZChan inC
+    (inC, outC) <- newZChan
+    let action = void $ async $ forever $ void $ iReadChan outC
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLn "Recorder died" >> return ()
+    return inC
 
-mkPrintingRecorder :: IO IstatChan
+mkPrintingRecorder :: IO IstatInChan
 mkPrintingRecorder = do
-    (inC, outC) <- U.newChan
-    let action = void $ async $ forever $ putStrLn . show =<< U.readChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> return ()
-    return $ ZChan inC
+    (inC, outC) <- newZChan
+    let action = void $ async $ forever $ putStrLn . show =<< iReadChan outC
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLn "Recorder died" >> return ()
+    return inC
 
 
---data Ticker = Ticker {
---      channel :: U.OutChan ()
---    , 
---newTicker :: Int -> IO Ticker
---
---tick :: Int -> IO (U.OutChan ())
---tick d = do
---    (_, o) <- U.newChan
---    return o
+tick :: Int -> IO (U.OutChan ())
+tick d = do
+    (i, o) <- U.newChan
+    let action = U.writeChan i ()
+    void $ async $ forever $ action >> threadDelay (d * 1000000)
+    return o
+
