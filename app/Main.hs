@@ -8,7 +8,7 @@ import Istatd
 main :: IO ()
 main = do
   sink <- mkPrintingRecorder
-  stats <- mkFilterPipeline sink [mkMonitoredBuffer "monitor" 5, mkFilterPrefix "Hi.", mkFilterSuffix ".no"]
+  stats <- mkFilterPipeline sink [mkSlowdownBuffer 1000000 5, mkMonitoredBuffer "monitor" 5, mkFilterPrefix "Hi.", mkFilterSuffix ".no"]
 
   forever $ do
     iWriteChan stats (Counter "name" 1 100)

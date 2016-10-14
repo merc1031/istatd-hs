@@ -98,6 +98,13 @@ mkMonitoredBuffer name size = \out -> do
     recordAction
     return inC
 
+mkSlowdownBuffer :: Int -> Int -> FilterFunc
+mkSlowdownBuffer time size = \out -> do
+    (inC, outC) <- newBChan size
+    let action = void $ async $ forever $ iWriteChan out =<< (iReadChan outC << threadDelay time)
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLn "MonitoredBuffer died" >> return ()
+    return inC
+
 mkNullRecorder :: IO IstatInChan
 mkNullRecorder = do
     (inC, outC) <- newZChan
@@ -119,4 +126,7 @@ tick d = do
     let action = U.writeChan i ()
     void $ async $ forever $ action >> threadDelay (d * 1000000)
     return o
+
+(<<) :: Monad m => m b -> m () -> m b
+a << s = const a =<< s
 
