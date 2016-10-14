@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 module Istatd.Chan where
 
 import            Control.Arrow                           ( (***) )
@@ -9,6 +10,7 @@ import            Data.IORef                              ( IORef
                                                           , atomicModifyIORef'
                                                           , newIORef
                                                           )
+import            Control.DeepSeq                         ( NFData (..) )
 
 import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU
@@ -18,6 +20,14 @@ data InChanI a = ZInChan (U.InChan a)
 
 data OutChanI a = ZOutChan (U.OutChan a)
                 | BOutChan (IORef Int) (BU.OutChan a)
+
+instance NFData (InChanI a) where
+  rnf (ZInChan !_chan) = ()
+  rnf (BInChan !_ref !_chan) = ()
+
+instance NFData (OutChanI a) where
+  rnf (ZOutChan !_chan) = ()
+  rnf (BOutChan !_ref !_chan) = ()
 
 iWriteChan :: MonadIO m
            => InChanI a
