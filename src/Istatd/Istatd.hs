@@ -5,6 +5,7 @@ module Istatd.Istatd
 ( ChanLike (..)
 , IstatdDatum (..)
 , IstatdType (..)
+, ChannelException (..)
 , FilterFunc
 , mkFilterPipeline
 , mkBuffer
