@@ -56,7 +56,7 @@ iWriteChan :: MonadIO m
 iWriteChan (ZInChan uchan) r =
   liftIO $ handleBlocked $ U.writeChan uchan r
 iWriteChan (BInChan c buchan) r =
-  liftIO $ handleBlocked $ BU.writeChan buchan r >> (void $ atomicModifyIORef' c (\c' -> (c' + 1, ())))
+  liftIO $ handleBlocked $ BU.writeChan buchan r >> (modLen c (+))
 
 iReadChan :: (MonadIO m)
           => OutChanI a
@@ -64,7 +64,7 @@ iReadChan :: (MonadIO m)
 iReadChan (ZOutChan uchan) =
   liftIO $ handleBlocked $ U.readChan uchan
 iReadChan (BOutChan c buchan) =
-  liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (void $ atomicModifyIORef' c (\c' -> (c' - 1, ()))) >> return r
+  liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r
 
 iOutChanLen :: (MonadIO m)
             => OutChanI a
@@ -72,7 +72,7 @@ iOutChanLen :: (MonadIO m)
 iOutChanLen (ZOutChan {}) =
   return 0
 iOutChanLen (BOutChan c _) =
-  liftIO $ atomicModifyIORef' c (\c' -> (c', c'))
+  liftIO $ getLen c
 
 iInChanLen :: (MonadIO m)
            => InChanI a
@@ -80,7 +80,7 @@ iInChanLen :: (MonadIO m)
 iInChanLen (ZInChan {}) =
   return 0
 iInChanLen (BInChan c _) =
-  liftIO $ atomicModifyIORef' c (\c' -> (c', c'))
+  liftIO $ getLen c
 
 newZChan :: (MonadIO m)
          => m (InChanI a, OutChanI a)
@@ -94,7 +94,19 @@ newBChan size = do
   c <- liftIO $ newIORef 0
   (BInChan c *** BOutChan c) <$> (liftIO $ BU.newChan size)
 
+modLen :: IORef Int
+       -> (Int -> Int -> Int)
+       -> IO ()
+modLen c op =
+  void $ atomicModifyIORef' c (\c' -> (c' `op` 1, ()))
+
+getLen :: IORef Int
+       -> IO Int
+getLen c =
+  atomicModifyIORef' c (\c' -> (c', c'))
+
 handleBlocked :: (MonadCatch m)
               => m a
               -> m a
-handleBlocked a = handle (\(_ :: BlockedIndefinitelyOnMVar) -> throwM ChannelBlockedException) a
+handleBlocked a =
+  handle (\(_ :: BlockedIndefinitelyOnMVar) -> throwM ChannelBlockedException) a

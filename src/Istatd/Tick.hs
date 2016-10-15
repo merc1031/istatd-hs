@@ -18,8 +18,8 @@ tick :: (MonadIO m)
      => Int
      -> m (U.OutChan ())
 tick d = liftIO $ do
-    (i, o) <- U.newChan
-    let action = U.writeChan i ()
-    void $ async $ forever $ action >> threadDelay (d * 1000000)
-    return o
+  (i, o) <- U.newChan
+  let action = U.writeChan i ()
+  void $ async $ forever $ action >> threadDelay (d * 1000000)
+  return o
 

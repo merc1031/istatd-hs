@@ -31,13 +31,14 @@ connect :: (MonadIO m)
         => IstatdConfig
         -> m Connection
 connect IstatdConfig {..} = liftIO $ do
-    hostEntry <- NetBsd.getHostByName hostName
-    let addr = Net.SockAddrInet hostPort (NetBsd.hostAddress hostEntry)
-    socket <- Net.socket Net.AF_INET Net.Datagram 0
-    return $ Connection socket addr
+  hostEntry <- NetBsd.getHostByName hostName
+  let addr = Net.SockAddrInet hostPort (NetBsd.hostAddress hostEntry)
+  socket <- Net.socket Net.AF_INET Net.Datagram 0
+  return $ Connection socket addr
 
 send :: (MonadIO m)
      => Connection
      -> [IstatdDatum]
      -> m ()
-send (Connection {..}) ps = liftIO $ NetBS.sendManyTo socket (map toPacket ps) addr
+send (Connection {..}) ps =
+  liftIO $ NetBS.sendManyTo socket (map toPacket ps) addr

@@ -23,31 +23,35 @@ data IstatdType = Counter
 
 data IstatdDatum = IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double
 
+type FilterFunc c m = (c -> m c)
+
 instance Show IstatdDatum where
-  show (IstatdDatum it k t d) = "IstatdDatum "
-                             <> show it
-                             <> " "
-                             <> (BSLC.unpack $ BSLB.toLazyByteString $ k)
-                             <> " "
-                             <> show t
-                             <> " "
-                             <> show d
+  show (IstatdDatum it k t d) =
+      "IstatdDatum "
+    <> show it
+    <> " "
+    <> (BSLC.unpack $ BSLB.toLazyByteString $ k)
+    <> " "
+    <> show t
+    <> " "
+    <> show d
 
 toPacket :: IstatdDatum
          -> BS.ByteString
-toPacket datum = BSL.toStrict . BSLB.toLazyByteString $ encode datum
+toPacket datum =
+  BSL.toStrict . BSLB.toLazyByteString $ encode datum
 
 -- | Serializes an istatd packet as a ByteString.
 encode :: IstatdDatum
        -> BSLB.Builder
 encode (IstatdDatum ptype name _t value) =
-    prefix <>
-    name <>
-    BSLB.char7 ' ' <>
-    BSLB.byteString (PrintDouble.toShortest value) <>
-    BSLB.char7 '\n'
-  where
-    prefix = case ptype of
+  prefix <>
+  name <>
+  BSLB.char7 ' ' <>
+  BSLB.byteString (PrintDouble.toShortest value) <>
+  BSLB.char7 '\n'
+    where
+      prefix = case ptype of
         Counter -> BSLB.char7 '*'
         Gauge -> mempty
 {-# INLINE encode #-}
@@ -59,7 +63,5 @@ getKey (IstatdDatum _ k _ _) = k
 updateKey :: BSLB.Builder
           -> IstatdDatum
           -> IstatdDatum
-updateKey k (IstatdDatum c _k t i) = IstatdDatum c k t i
-
-type FilterFunc c m = (c -> m c)
-
+updateKey k (IstatdDatum c _k t i) =
+  IstatdDatum c k t i
