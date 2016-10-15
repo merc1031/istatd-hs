@@ -29,12 +29,12 @@ import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU
 
 instance ChanLike InChanI OutChanI a where
-  clNewZChan = newZChan
-  clNewBChan = newBChan
-  clWriteChan = iWriteChan
-  clReadChan = iReadChan
-  clInChanLen = iInChanLen
-  clOutChanLen = iOutChanLen
+  newZChan = iNewZChan
+  newBChan = iNewBChan
+  writeChan = iWriteChan
+  readChan = iReadChan
+  inChanLen = iInChanLen
+  outChanLen = iOutChanLen
 
 data InChanI a = ZInChan (U.InChan a)
                | BInChan (TVar Int) (BU.InChan a)
@@ -83,15 +83,15 @@ iInChanLen (ZInChan {}) =
 iInChanLen (BInChan c _) =
   liftIO $ getLen c
 
-newZChan :: (MonadIO m)
+iNewZChan :: (MonadIO m)
          => m (InChanI a, OutChanI a)
-newZChan =
+iNewZChan =
   (ZInChan *** ZOutChan) <$> liftIO U.newChan
 
-newBChan :: (MonadIO m)
+iNewBChan :: (MonadIO m)
          => Int
          -> m (InChanI a, OutChanI a)
-newBChan size = do
+iNewBChan size = do
   c <- liftIO $ newTVarIO 0
   (BInChan c *** BOutChan c) <$> (liftIO $ BU.newChan size)
 

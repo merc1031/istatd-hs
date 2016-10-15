@@ -17,5 +17,5 @@ main = do
 
   forever $ do
     t <- POSIX.getPOSIXTime
-    clWriteChan stats (IstatdDatum Counter "name" t 100)
+    writeChan stats (IstatdDatum Counter "name" t 100)
     threadDelay 100000

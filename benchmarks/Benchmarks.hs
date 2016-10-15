@@ -47,17 +47,17 @@ prefixBench p =
   bgroup "prefixBenches" [
       let environment = mkPipeEnv [mkFilterPrefix "HiImAPrefix"]
       in env environment $ \e -> bench "prefixBench" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     , let environment = mkPipeEnv [mkFilterPrefix "HiImAPrefixThatIsVeryVeryVeryVeryLongLongLong"]
       in env environment $ \e -> bench "prefixBenchLong" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     , let environment = mkPipeEnv [ mkFilterPrefix "Hi"
                                   , mkFilterPrefix "Im"
                                   , mkFilterPrefix "A"
                                   , mkFilterPrefix "Prefix"
                                   ]
       in env environment $ \e -> bench "prefixBench4" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     ]
 
 suffixBench :: ( NFData (cit IstatdDatum)
@@ -70,18 +70,18 @@ suffixBench p =
   bgroup "suffixBenches" [
       let environment = mkPipeEnv [mkFilterSuffix "HiImASuffix"]
       in env environment $ \e -> bench "suffixBench" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
 
     , let environment = mkPipeEnv [mkFilterSuffix "HiImASuffixThatIsVeryVeryVeryVeryLongLongLong"]
       in env environment $ \e -> bench "suffixBenchLong" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     , let environment = mkPipeEnv [ mkFilterSuffix "Hi"
                                   , mkFilterSuffix "Im"
                                   , mkFilterSuffix "A"
                                   , mkFilterSuffix "Suffix"
                                   ]
       in env environment $ \e -> bench "suffixBench4" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     ]
 
 prefixSuffixBench :: ( NFData (cit IstatdDatum)
@@ -96,7 +96,7 @@ prefixSuffixBench p =
                                   , mkFilterPrefix "HiImAPrefix"
                                   ]
       in env environment $ \e -> bench "prefixSuffixBench" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
 
     ]
 
@@ -110,19 +110,19 @@ bufferBench5 p =
   bgroup "bufferBenches" [
       let environment = mkPipeEnv [mkBuffer 0]
       in env environment $ \e -> bench "bufferBench0" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     , let environment = mkPipeEnv [mkBuffer 1]
       in env environment $ \e -> bench "bufferBench1" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     , let environment = mkPipeEnv [mkBuffer 5]
       in env environment $ \e -> bench "bufferBench5" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     , let environment = mkPipeEnv [mkBuffer 50]
       in env environment $ \e -> bench "bufferBench50" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
     , let environment = mkPipeEnv [mkBuffer 500]
       in env environment $ \e -> bench "bufferBench500" $ nfIO $ do
-          writeChan p e
+          writeChanB p e
 
     ]
 
@@ -133,17 +133,17 @@ mkPipeEnv :: ( MonadIO m
           => [FilterFunc (cit IstatdDatum) m]
           -> m (cot IstatdDatum, cit IstatdDatum)
 mkPipeEnv ps = do
-  (inC, outC) <- clNewZChan
+  (inC, outC) <- newZChan
   sink <- mkPipeRecorder inC
   fp <- mkFilterPipeline sink ps
   return (outC, fp)
 
-writeChan :: ( MonadIO m
-             , ChanLike cit cot IstatdDatum
-             )
-          => Proxy (cit IstatdDatum)
-          -> (cot IstatdDatum, cit IstatdDatum)
-          -> m ()
-writeChan _ (c, e) = do
-  clWriteChan e $ IstatdDatum Counter "CounterName" 0 1
-  void $ liftIO $ clReadChan c
+writeChanB :: ( MonadIO m
+              , ChanLike cit cot IstatdDatum
+              )
+           => Proxy (cit IstatdDatum)
+           -> (cot IstatdDatum, cit IstatdDatum)
+           -> m ()
+writeChanB _ (c, e) = do
+  writeChan e $ IstatdDatum Counter "CounterName" 0 1
+  void $ liftIO $ readChan c
