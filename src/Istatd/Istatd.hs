@@ -23,7 +23,6 @@ where
 import            Control.Concurrent              ( threadDelay )
 import            Control.Concurrent.Async        ( async )
 import            Control.Exception.Safe          ( catch )
-import            Control.Exception               ( BlockedIndefinitelyOnMVar )
 import            Control.Monad                   ( void
                                                   , forever
                                                   , (=<<)
@@ -46,7 +45,9 @@ import            Istatd.Types                    ( IstatdDatum(..)
                                                   , toPacket
                                                   )
 import            Istatd.Tick                     ( tick )
-import            Istatd.Chan.ChanLike            ( ChanLike (..) )
+import            Istatd.Chan.ChanLike            ( ChanLike (..)
+                                                  , ChannelException (..)
+                                                  )
 import            Istatd.Control.Monad            ( (<<) )
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
@@ -91,7 +92,7 @@ mkBuffer :: ( MonadCatch m
 mkBuffer size = \out -> do
     (inC, outC) <- clNewBChan size
     let action = liftIO $ void $ async $ forever $ clWriteChan out =<< clReadChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Buffer died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "Buffer died" >> return ()
     return inC
 
 mkMonitoredBuffer :: ( MonadCatch m
@@ -111,7 +112,7 @@ mkMonitoredBuffer name size = \out -> do
                         writeAction len = clWriteChan out . datum len =<< POSIX.getPOSIXTime
                     in U.readChan ticker >> (writeAction =<< clInChanLen inC)
             in liftIO $ void $ async $ forever $ channelAction
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "MonitoredBuffer died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
     recordAction
     return inC
 
@@ -125,7 +126,7 @@ mkSlowdownBuffer :: ( MonadCatch m
 mkSlowdownBuffer time size = \out -> do
     (inC, outC) <- clNewBChan size
     let action = liftIO $ void $ async $ forever $ clWriteChan out =<< (clReadChan outC << threadDelay time)
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "MonitoredBuffer died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
     return inC
 
 mkNullRecorder :: ( MonadCatch m
@@ -136,7 +137,7 @@ mkNullRecorder :: ( MonadCatch m
 mkNullRecorder = do
     (inC, outC) <- clNewZChan
     let action = liftIO $ void $ async $ forever $ void $ clReadChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 mkPipeRecorder :: ( MonadCatch m
@@ -148,7 +149,7 @@ mkPipeRecorder :: ( MonadCatch m
 mkPipeRecorder c = do
     (inC, outC) <- clNewZChan
     let action = liftIO $ void $ async $ forever $ clWriteChan c =<< (clReadChan outC)
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 mkPrintingRecorder :: ( MonadCatch m
@@ -159,7 +160,7 @@ mkPrintingRecorder :: ( MonadCatch m
 mkPrintingRecorder = do
     (inC, outC) <- clNewZChan
     let action = liftIO $ void $ async $ forever $ putStrLn . show =<< clReadChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 mkPrintingEncodedRecorder :: ( MonadCatch m
@@ -170,7 +171,7 @@ mkPrintingEncodedRecorder :: ( MonadCatch m
 mkPrintingEncodedRecorder = do
     (inC, outC) <- clNewZChan
     let action = liftIO $ void $ async $ forever $ putStrLn . show . toPacket =<< clReadChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 mkIstatdRecorder :: ( MonadCatch m
@@ -184,7 +185,7 @@ mkIstatdRecorder config = do
     connection <- connect config
     let send' p = send connection [p]
     let action = liftIO $ void $ async $ forever $ send' =<< clReadChan outC
-    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
 

@@ -1,10 +1,16 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Istatd.Chan.Chan where
 
 import            Control.Arrow                           ( (***) )
+import            Control.Exception                       ( BlockedIndefinitelyOnMVar )
+import            Control.Exception.Safe                  ( handle
+                                                          , throwM
+                                                          )
 import            Control.Monad                           ( void )
+import            Control.Monad.Catch                     ( MonadCatch )
 import            Control.Monad.IO.Class                  ( MonadIO
                                                           , liftIO
                                                           )
@@ -13,7 +19,9 @@ import            Data.IORef                              ( IORef
                                                           , newIORef
                                                           )
 import            Control.DeepSeq                         ( NFData (..) )
-import            Istatd.Chan.ChanLike                    ( ChanLike (..) )
+import            Istatd.Chan.ChanLike                    ( ChanLike (..)
+                                                          , ChannelException (..)
+                                                          )
 
 import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU
@@ -46,17 +54,17 @@ iWriteChan :: MonadIO m
            -> a
            -> m ()
 iWriteChan (ZInChan uchan) r =
-  liftIO $ U.writeChan uchan r
+  liftIO $ handleBlocked $ U.writeChan uchan r
 iWriteChan (BInChan c buchan) r =
-  liftIO $ BU.writeChan buchan r >> (void $ atomicModifyIORef' c (\c' -> (c' + 1, ())))
+  liftIO $ handleBlocked $ BU.writeChan buchan r >> (void $ atomicModifyIORef' c (\c' -> (c' + 1, ())))
 
 iReadChan :: (MonadIO m)
           => OutChanI a
           -> m a
 iReadChan (ZOutChan uchan) =
-  liftIO $ U.readChan uchan
+  liftIO $ handleBlocked $ U.readChan uchan
 iReadChan (BOutChan c buchan) =
-  liftIO $ BU.readChan buchan >>= \r -> (void $ atomicModifyIORef' c (\c' -> (c' - 1, ()))) >> return r
+  liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (void $ atomicModifyIORef' c (\c' -> (c' - 1, ()))) >> return r
 
 iOutChanLen :: (MonadIO m)
             => OutChanI a
@@ -85,3 +93,8 @@ newBChan :: (MonadIO m)
 newBChan size = do
   c <- liftIO $ newIORef 0
   (BInChan c *** BOutChan c) <$> (liftIO $ BU.newChan size)
+
+handleBlocked :: (MonadCatch m)
+              => m a
+              -> m a
+handleBlocked a = handle (\(_ :: BlockedIndefinitelyOnMVar) -> throwM ChannelBlockedException) a
