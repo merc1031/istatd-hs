@@ -19,7 +19,7 @@ import qualified  Data.Time.Clock.POSIX               as POSIX
 
 data IstatdType = Counter
                 | Gauge
-                deriving (Show)
+                deriving (Show, Eq)
 
 data IstatdDatum = IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double
 
@@ -35,6 +35,17 @@ instance Show IstatdDatum where
     <> show t
     <> " "
     <> show d
+
+instance Eq IstatdDatum where
+  (IstatdDatum it k t d) == (IstatdDatum it' k' t' d') =
+    it == it'
+    &&
+    BSLB.toLazyByteString k == BSLB.toLazyByteString k'
+    &&
+    t == t'
+    &&
+    d == d'
+
 
 toPacket :: IstatdDatum
          -> BS.ByteString
