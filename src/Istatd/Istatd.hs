@@ -5,6 +5,7 @@ module Istatd.Istatd
 ( ChanLike (..)
 , IstatdDatum (..)
 , IstatdType (..)
+, FilterFunc
 , mkFilterPipeline
 , mkBuffer
 , mkFilterPrefix
@@ -15,6 +16,7 @@ module Istatd.Istatd
 , mkPrintingRecorder
 , mkPrintingEncodedRecorder
 , mkIstatdRecorder
+, mkPipeRecorder
 )
 where
 
@@ -60,7 +62,7 @@ mkFilterPipeline :: (MonadIO m)
                  -> m (ci IstatdDatum)
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
-mkFilterPrefix :: (MonadIO m, ChanLike ci ct IstatdDatum)
+mkFilterPrefix :: (MonadIO m, ChanLike ci co IstatdDatum)
                => BSLB.Builder
                -> FilterFunc (ci IstatdDatum) m
 mkFilterPrefix prefix = \out -> do
@@ -70,7 +72,7 @@ mkFilterPrefix prefix = \out -> do
     liftIO $ void $ async $ forever $ action =<< clReadChan outC
     return inC
 
-mkFilterSuffix :: (MonadIO m, ChanLike ci ct IstatdDatum)
+mkFilterSuffix :: (MonadIO m, ChanLike ci co IstatdDatum)
                => BSLB.Builder
                -> FilterFunc (ci IstatdDatum) m
 mkFilterSuffix suffix = \out -> do
@@ -82,7 +84,7 @@ mkFilterSuffix suffix = \out -> do
 
 mkBuffer :: ( MonadCatch m
             , MonadIO m
-            , ChanLike ci ct IstatdDatum
+            , ChanLike ci co IstatdDatum
             )
          => Int
          -> FilterFunc (ci IstatdDatum) m
@@ -94,7 +96,7 @@ mkBuffer size = \out -> do
 
 mkMonitoredBuffer :: ( MonadCatch m
                      , MonadIO m
-                     , ChanLike ci ct IstatdDatum
+                     , ChanLike ci co IstatdDatum
                      )
                   => BSLB.Builder
                   -> Int
@@ -115,7 +117,7 @@ mkMonitoredBuffer name size = \out -> do
 
 mkSlowdownBuffer :: ( MonadCatch m
                     , MonadIO m
-                    , ChanLike ci ct IstatdDatum
+                    , ChanLike ci co IstatdDatum
                     )
                  => Int
                  -> Int
@@ -128,7 +130,7 @@ mkSlowdownBuffer time size = \out -> do
 
 mkNullRecorder :: ( MonadCatch m
                   , MonadIO m
-                  , ChanLike ci ct IstatdDatum
+                  , ChanLike ci co IstatdDatum
                   )
                => m (ci IstatdDatum)
 mkNullRecorder = do
@@ -137,9 +139,21 @@ mkNullRecorder = do
     action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
     return inC
 
+mkPipeRecorder :: ( MonadCatch m
+                  , MonadIO m
+                  , ChanLike ci co IstatdDatum
+                  )
+               => ci IstatdDatum
+               -> m (ci IstatdDatum)
+mkPipeRecorder c = do
+    (inC, outC) <- clNewZChan
+    let action = liftIO $ void $ async $ forever $ clWriteChan c =<< (clReadChan outC)
+    action `catch` \(_ :: BlockedIndefinitelyOnMVar) -> putStrLnIO "Recorder died" >> return ()
+    return inC
+
 mkPrintingRecorder :: ( MonadCatch m
                       , MonadIO m
-                      , ChanLike ci ct IstatdDatum
+                      , ChanLike ci co IstatdDatum
                       )
                    => m (ci IstatdDatum)
 mkPrintingRecorder = do
@@ -150,7 +164,7 @@ mkPrintingRecorder = do
 
 mkPrintingEncodedRecorder :: ( MonadCatch m
                              , MonadIO m
-                             , ChanLike ci ct IstatdDatum
+                             , ChanLike ci co IstatdDatum
                              )
                           => m (ci IstatdDatum)
 mkPrintingEncodedRecorder = do
@@ -161,7 +175,7 @@ mkPrintingEncodedRecorder = do
 
 mkIstatdRecorder :: ( MonadCatch m
                     , MonadIO m
-                    , ChanLike ci ct IstatdDatum
+                    , ChanLike ci co IstatdDatum
                     )
                  => IstatdConfig
                  -> m (ci IstatdDatum)
