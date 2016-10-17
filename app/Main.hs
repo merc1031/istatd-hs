@@ -9,7 +9,8 @@ import qualified  Istatd.Chan.ChanT       as ChanT
 
 main :: IO ()
 main = do
-  sink <- mkPrintingEncodedRecorder :: IO (ChanT.InChanI IstatdDatum)
+  state <- mkSinkState
+  sink <- mkPrintingEncodedRecorder state :: IO (ChanT.InChanI IstatdDatum)
   stats <- mkFilterPipeline sink [mkMonitoredBuffer "monitor" 5
                                  , mkFilterPrefix "Hi."
                                  , mkFilterSuffix ".no"
@@ -17,5 +18,5 @@ main = do
 
   forever $ do
     t <- POSIX.getPOSIXTime
-    writeChan stats (IstatdDatum Counter "name" t 100)
+    writeChan stats (Counter "name" t 100)
     threadDelay 100000

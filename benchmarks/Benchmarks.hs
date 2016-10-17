@@ -154,7 +154,8 @@ mkPipeEnv :: ( MonadIO m
           -> m (cot IstatdDatum, cit IstatdDatum)
 mkPipeEnv ps = do
   (inC, outC) <- newZChan
-  sink <- mkPipeRecorder inC
+  state <- mkSinkState
+  sink <- mkPipeRecorder inC state
   fp <- mkFilterPipeline sink ps
   return (outC, fp)
 
@@ -177,7 +178,7 @@ writeChanNU :: ( MonadIO m
            -> (cit IstatdDatum)
            -> m ()
 writeChanNU _ n e = do
-  replicateM_ n $ writeChan e $ IstatdDatum Counter "CounterName" 0 1
+  replicateM_ n $ writeChan e $ Counter "CounterName" 0 1
 
 writeChanB :: ( MonadIO m
               , ChanLike cit cot IstatdDatum
@@ -196,4 +197,4 @@ writeChanU :: ( MonadIO m
            -> (cit IstatdDatum)
            -> m ()
 writeChanU _ e = do
-  writeChan e $ IstatdDatum Counter "CounterName" 0 1
+  writeChan e $ Counter "CounterName" 0 1

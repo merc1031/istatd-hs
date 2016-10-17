@@ -9,10 +9,9 @@ where
 import            Control.Monad.IO.Class        ( MonadIO
                                                 , liftIO
                                                 )
-import            Istatd.Types                  ( IstatdDatum (..)
-                                                , toPacket
-                                                )
+import            Istatd.Types                  ( IstatdDatum (..) )
 
+import qualified  Data.ByteString               as BS
 import qualified  Network.BSD                   as NetBsd
 import qualified  Network.Socket                as Net
 import qualified  Network.Socket.ByteString     as NetBS
@@ -39,6 +38,8 @@ connect IstatdConfig {..} = liftIO $ do
 send :: (MonadIO m)
      => Connection
      -> [IstatdDatum]
+     -> (IstatdDatum -> m BS.ByteString)
      -> m ()
-send (Connection {..}) ps =
-  liftIO $ NetBS.sendManyTo socket (map toPacket ps) addr
+send (Connection {..}) ps encoder = do
+  ps' <- mapM encoder ps
+  liftIO $ NetBS.sendManyTo socket ps' addr
