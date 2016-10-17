@@ -45,11 +45,12 @@ import            Istatd.Client                   ( IstatdConfig (..)
                                                   , connect
                                                   , send
                                                   )
-import            Istatd.Types                    ( IstatdDatum(..)
-                                                  , IstatdType (..)
-                                                  , DifferenceCounter (..)
+import            Istatd.Datum.DifferenceCounter  ( DifferenceCounter (..)
                                                   , DifferenceState (..)
                                                   , mkDifferenceState
+                                                  )
+import            Istatd.Types                    ( IstatdDatum(..)
+                                                  , IstatdType (..)
                                                   , FilterFunc
                                                   , FilterFuncT
                                                   , updateKey
@@ -84,8 +85,6 @@ mkFilterPipeline :: (MonadIO m)
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
 mkFilterDifference :: ( MonadIO m
---                      , ChanLike ci co DifferenceCounter
---                      , ChanLike ci' co' IstatdDatum
                       , ChanLike ci _co IstatdDatum
                       , ChanLike ci' _co DifferenceCounter
                       )

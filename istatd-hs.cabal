@@ -22,6 +22,7 @@ library
                      , Istatd.Chan.ChanT
                      , Istatd.Chan.ChanLike
                      , Istatd.Client
+                     , Istatd.Datum.DifferenceCounter
                      , Istatd.Tick
                      , Istatd.Types
                      , Istatd.Control.Monad
