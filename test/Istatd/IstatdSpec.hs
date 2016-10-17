@@ -5,7 +5,7 @@
 module Istatd.IstatdSpec where
 
 import Control.Exception (catch)
-import Control.Monad (replicateM_)
+import Control.Monad (replicateM_, forM_)
 import Control.Monad.IO.Class (MonadIO)
 import Control.Monad.Catch (MonadCatch)
 import Test.Hspec
@@ -22,6 +22,18 @@ mkPipeEnv ps = do
   (inC, outC) <- newZChan
   sink <- mkPipeRecorder inC
   fp <- mkFilterPipeline sink ps
+  return (outC, fp)
+
+mkPipeEnvWithSource :: ( MonadIO m
+                       , MonadCatch m
+                       )
+                    => FilterFuncT (ChanT.InChanI IstatdDatum) (ChanT.InChanI a) m
+                    -> [FilterFunc (ChanT.InChanI IstatdDatum) m]
+                    -> m (ChanT.OutChanI IstatdDatum, ChanT.InChanI a)
+mkPipeEnvWithSource source ps = do
+  (inC, outC) <- newZChan
+  sink <- mkPipeRecorder inC
+  fp <- mkFilterPipelineWithSource sink source ps
   return (outC, fp)
 
 -- `main` is here so that this module can be run from GHCi on its own.  It is
@@ -98,19 +110,39 @@ spec = do
             res <- readChan tchan
             res `shouldBe` (IstatdDatum Counter "CounterName" 0 1)
         ensureNoLeftovers tchan
-    it "sends all messages through channel buffering" $ do
+    it "sends all messages through channel of 1000 buffering 100 messages" $ do
         (tchan, pipeline) <- mkPipeEnv [mkBuffer 1000]
         replicateM_ 100 $ writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         replicateM_ 100 $ do
             res <- readChan tchan
             res `shouldBe` (IstatdDatum Counter "CounterName" 0 1)
         ensureNoLeftovers tchan
-    it "sends all messages through channel buffering" $ do
+    it "sends all messages through channel of 1000 buffering 10000 messages" $ do
         (tchan, pipeline) <- mkPipeEnv [mkBuffer 1000]
         replicateM_ 10000 $ writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         replicateM_ 10000 $ do
             res <- readChan tchan
             res `shouldBe` (IstatdDatum Counter "CounterName" 0 1)
+        ensureNoLeftovers tchan
+    it "difference counters maintain state" $ do
+        dstate <- mkDifferenceState
+        (tchan, pipeline) <- mkPipeEnvWithSource (mkFilterDifference dstate) []
+        forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
+        res <- readChan tchan
+        res `shouldBe` (IstatdDatum Counter "CounterName" 0 0)
+        replicateM_ 9999 $ do
+            res <- readChan tchan
+            res `shouldBe` (IstatdDatum Counter "CounterName" 0 1)
+        ensureNoLeftovers tchan
+    it "difference counters maintain state with other filters" $ do
+        dstate <- mkDifferenceState
+        (tchan, pipeline) <- mkPipeEnvWithSource (mkFilterDifference dstate) [mkFilterPrefix "a", mkFilterSuffix "c", mkBuffer 1000]
+        forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
+        res <- readChan tchan
+        res `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 0)
+        replicateM_ 9999 $ do
+            res <- readChan tchan
+            res `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 1)
         ensureNoLeftovers tchan
 
 

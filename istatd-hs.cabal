@@ -40,6 +40,7 @@ library
                      , time
                      , network
                      , safe-exceptions
+                     , unordered-containers
   default-language:    Haskell2010
 
 executable istatd-hs-exe

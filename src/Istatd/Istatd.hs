@@ -5,9 +5,12 @@ module Istatd.Istatd
 ( ChanLike (..)
 , IstatdDatum (..)
 , IstatdType (..)
+, DifferenceCounter (..)
 , ChannelException (..)
 , FilterFunc
+, FilterFuncT
 , mkFilterPipeline
+, mkFilterPipelineWithSource
 , mkBuffer
 , mkFilterPrefix
 , mkFilterSuffix
@@ -18,9 +21,12 @@ module Istatd.Istatd
 , mkPrintingEncodedRecorder
 , mkIstatdRecorder
 , mkPipeRecorder
+, mkFilterDifference
+, mkDifferenceState
 )
 where
 
+import            Control.Concurrent.STM
 import            Control.Concurrent              ( threadDelay )
 import            Control.Concurrent.Async        ( async )
 import            Control.Exception.Safe          ( catch )
@@ -28,6 +34,7 @@ import            Control.Monad                   ( void
                                                   , forever
                                                   , (=<<)
                                                   , (>=>)
+                                                  , (<=<)
                                                   )
 import            Control.Monad.Catch             ( MonadCatch )
 import            Control.Monad.IO.Class          ( MonadIO
@@ -40,7 +47,11 @@ import            Istatd.Client                   ( IstatdConfig (..)
                                                   )
 import            Istatd.Types                    ( IstatdDatum(..)
                                                   , IstatdType (..)
+                                                  , DifferenceCounter (..)
+                                                  , DifferenceState (..)
+                                                  , mkDifferenceState
                                                   , FilterFunc
+                                                  , FilterFuncT
                                                   , updateKey
                                                   , getKey
                                                   , toPacket
@@ -53,9 +64,17 @@ import            Istatd.Control.Monad            ( (<<) )
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
 import qualified  Data.ByteString.Lazy.Builder    as BSLB
+import qualified  Data.HashMap.Strict             as HM
 import qualified  Data.Time.Clock.POSIX           as POSIX
 
 
+
+mkFilterPipelineWithSource :: (MonadIO m)
+                           => ci IstatdDatum
+                           -> FilterFuncT (ci IstatdDatum) (ci' a) m
+                           -> [FilterFunc (ci IstatdDatum) m]
+                           -> m (ci' a)
+mkFilterPipelineWithSource sink source fs = source <=< foldr (>=>) return fs $ sink
 
 
 mkFilterPipeline :: (MonadIO m)
@@ -64,7 +83,32 @@ mkFilterPipeline :: (MonadIO m)
                  -> m (ci IstatdDatum)
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
-mkFilterPrefix :: (MonadIO m, ChanLike ci co IstatdDatum)
+mkFilterDifference :: ( MonadIO m
+--                      , ChanLike ci co DifferenceCounter
+--                      , ChanLike ci' co' IstatdDatum
+                      , ChanLike ci _co IstatdDatum
+                      , ChanLike ci' _co DifferenceCounter
+                      )
+                   => DifferenceState
+                   -> FilterFuncT (ci IstatdDatum) (ci' DifferenceCounter) m
+mkFilterDifference (DifferenceState stateV) = \out -> do
+  (inC, outC) <- newZChan
+  let action (DifferenceCounter k t v) = do
+        v' <- liftIO $ atomically $ do
+          oldH <- readTVar stateV
+          let diff = case HM.lookup k oldH of
+                Just d -> v - d
+                Nothing -> 0
+          modifyTVar' stateV (\h -> HM.insert k v h)
+          return diff
+--        t <- POSIX.getPOSIXTime
+        writeChan out $ IstatdDatum Counter (BSLB.lazyByteString k) t v'
+  go $ forever $ action =<< readChan outC
+  return inC
+
+mkFilterPrefix :: ( MonadIO m
+                  , ChanLike ci co IstatdDatum
+                  )
                => BSLB.Builder
                -> FilterFunc (ci IstatdDatum) m
 mkFilterPrefix prefix = \out -> do

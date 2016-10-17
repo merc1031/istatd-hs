@@ -1,13 +1,21 @@
 module Istatd.Types
 ( IstatdDatum (..)
 , IstatdType (..)
+, DifferenceCounter (..)
+, DifferenceState (..)
+, mkDifferenceState
 , FilterFunc
+, FilterFuncT
 , getKey
 , updateKey
 , toPacket
 )
 where
 
+import            Control.Concurrent.STM
+import            Control.Monad.IO.Class              ( MonadIO
+                                                      , liftIO
+                                                      )
 import            Data.Monoid                         ( (<>) )
 
 import qualified  Data.ByteString                     as BS
@@ -15,15 +23,20 @@ import qualified  Data.ByteString.Lazy                as BSL
 import qualified  Data.ByteString.Lazy.Char8          as BSLC
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.Double.Conversion.ByteString   as PrintDouble
+import qualified  Data.HashMap.Strict                 as HM
 import qualified  Data.Time.Clock.POSIX               as POSIX
 
 data IstatdType = Counter
                 | Gauge
                 deriving (Show, Eq)
 
+data DifferenceCounter = DifferenceCounter !BSLC.ByteString !POSIX.POSIXTime !Double
+newtype DifferenceState = DifferenceState (TVar (HM.HashMap BSLC.ByteString Double))
+
 data IstatdDatum = IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double
 
 type FilterFunc c m = (c -> m c)
+type FilterFuncT ci co m = (ci -> m co)
 
 instance Show IstatdDatum where
   show (IstatdDatum it k t d) =
@@ -46,6 +59,9 @@ instance Eq IstatdDatum where
     &&
     d == d'
 
+mkDifferenceState :: MonadIO m
+                  => m DifferenceState
+mkDifferenceState = DifferenceState <$> (liftIO $ newTVarIO HM.empty)
 
 toPacket :: IstatdDatum
          -> BS.ByteString
