@@ -6,6 +6,7 @@ import            Control.Monad.IO.Class
 import            Control.Monad.Catch             ( MonadCatch )
 import            Control.Monad                   ( void
                                                   , replicateM_
+                                                  , forM_
                                                   )
 import            Control.DeepSeq                 ( NFData )
 import            Criterion.Main
@@ -29,12 +30,14 @@ benches = [
     , suffixBench (Proxy :: Proxy ChannelAtomic)
     , prefixSuffixBench (Proxy :: Proxy ChannelAtomic)
     , bufferBench5 (Proxy :: Proxy ChannelAtomic)
+    , differenceBench (Proxy :: Proxy (Chan.InChanI DifferenceCounter, Chan.OutChanI IstatdDatum))
     ]
   , bgroup "ChanT" [
       prefixBench (Proxy :: Proxy ChannelTVar)
     , suffixBench (Proxy :: Proxy ChannelTVar)
     , prefixSuffixBench (Proxy :: Proxy ChannelTVar)
     , bufferBench5 (Proxy :: Proxy ChannelTVar)
+    , differenceBench (Proxy :: Proxy (ChanT.InChanI DifferenceCounter, ChanT.OutChanI IstatdDatum))
     ]
   ]
 
@@ -87,9 +90,9 @@ prefixSuffixBench :: ( NFData (cit IstatdDatum)
                   -> Benchmark
 prefixSuffixBench p =
   bgroup "prefixSuffixBenches" [
-      let e = mkPipeEnv [mkFilterSuffix "HiImASuffix"
-                                  , mkFilterPrefix "HiImAPrefix"
-                                  ]
+      let e = mkPipeEnv [ mkFilterSuffix "HiImASuffix"
+                        , mkFilterPrefix "HiImAPrefix"
+                        ]
       in genStandardBenchGroup p "prefixSuffixBench" e
     ]
 
@@ -113,6 +116,28 @@ bufferBench5 p =
       in genStandardBenchGroup p "bufferBench500" e
     ]
 
+differenceBench :: ( NFData (cit DifferenceCounter)
+                   , NFData (cot' IstatdDatum)
+                   , ChanLike cit cot DifferenceCounter
+                   , ChanLike cit' cot' IstatdDatum
+                   )
+                => Proxy (cit DifferenceCounter, cot' IstatdDatum)
+                -> Benchmark
+differenceBench p =
+  bgroup "differenceBenches" [
+      let e = do
+            dstate <- mkDifferenceState
+            mkPipeEnvWithSource (mkFilterDifference dstate) []
+      in genStandardBenchGroup' p "differenceBench" writeAct writeActN e
+    ]
+    where
+      writeAct _ (c,e) = do
+        writeChan e $ DifferenceCounter "CounterName" 0 1
+        void $ liftIO $ readChan c
+      writeActN _ n (c,e) = do
+        liftIO $ forM_ [1..n] $ \v -> writeChan e $ DifferenceCounter "CounterName" 0 (fromIntegral v)
+        void $ liftIO $ replicateM_ n $ readChan c
+
 data Bench = BenchSingle
            | BenchNumber Int
 
@@ -124,27 +149,40 @@ genStandardBenchGroup :: ( NFData (cit IstatdDatum)
                       -> String
                       -> (IO (cot IstatdDatum, cit IstatdDatum))
                       -> Benchmark
-genStandardBenchGroup p groupName environment =
-       genBenchGroup p groupName environment [BenchSingle, BenchNumber 100, BenchNumber 500]
+genStandardBenchGroup _ groupName environment =
+  genStandardBenchGroup' (Proxy :: Proxy (cit IstatdDatum, cot IstatdDatum)) groupName writeChanB writeChanNB environment
 
-genBenchGroup :: ( NFData (cit IstatdDatum)
-                 , NFData (cot IstatdDatum)
-                 , ChanLike cit cot IstatdDatum
-                 )
-              => Proxy (cit IstatdDatum)
-              -> String
-              -> (IO (cot IstatdDatum, cit IstatdDatum))
-              -> [Bench]
-              -> Benchmark
-genBenchGroup p groupName environment benchmarks =
+genStandardBenchGroup' :: ( NFData (cot IstatdDatum)
+                          , NFData (cit a)
+                          )
+                       => Proxy (cit a, cot IstatdDatum)
+                       -> String
+                       -> (Proxy (cit a, cot IstatdDatum) -> (cot IstatdDatum, cit a) -> IO ())
+                       -> (Proxy (cit a, cot IstatdDatum) -> Int -> (cot IstatdDatum, cit a) -> IO ())
+                       -> (IO (cot IstatdDatum, cit a))
+                       -> Benchmark
+genStandardBenchGroup' p groupName act actn environment =
+  genBenchGroup' p groupName act actn environment [BenchSingle, BenchNumber 100, BenchNumber 500]
+
+genBenchGroup' :: ( NFData (cot IstatdDatum)
+                  , NFData (cit a)
+                  )
+               => Proxy (cit a, cot IstatdDatum)
+               -> String
+               -> (Proxy (cit a, cot IstatdDatum) -> (cot IstatdDatum, cit a) -> IO ())
+               -> (Proxy (cit a, cot IstatdDatum) -> Int -> (cot IstatdDatum, cit a) -> IO ())
+               -> (IO (cot IstatdDatum, cit a))
+               -> [Bench]
+               -> Benchmark
+genBenchGroup' p groupName act actn environment benchmarks =
        bgroup groupName $ map mkBench benchmarks
     where
         mkBench BenchSingle =
           env environment $ \e -> bench "singleWrite" $ nfIO $ do
-            writeChanB p e
+            liftIO $ act p e
         mkBench (BenchNumber n) =
           env environment $ \e -> bench ("write" ++ show n) $ nfIO $ do
-            writeChanNB p n e
+            liftIO $ actn p n e
 
 mkPipeEnv :: ( MonadIO m
              , MonadCatch m
@@ -158,31 +196,44 @@ mkPipeEnv ps = do
   fp <- mkFilterPipeline sink ps
   return (outC, fp)
 
+mkPipeEnvWithSource :: ( MonadIO m
+                       , MonadCatch m
+                       , ChanLike cit cot IstatdDatum
+                       )
+                    => FilterFuncT (cit IstatdDatum) (cit' a) m
+                    -> [FilterFunc (cit IstatdDatum) m]
+                    -> m (cot IstatdDatum, cit' a)
+mkPipeEnvWithSource source ps = do
+  (inC, outC) <- newZChan
+  sink <- mkPipeRecorder inC
+  fp <- mkFilterPipelineWithSource sink source ps
+  return (outC, fp)
+
 writeChanNB :: ( MonadIO m
-              , ChanLike cit cot IstatdDatum
-              )
-           => Proxy (cit IstatdDatum)
-           -> Int
-           -> (cot IstatdDatum, cit IstatdDatum)
-           -> m ()
+               , ChanLike cit cot IstatdDatum
+               )
+            => Proxy (cit IstatdDatum, cot IstatdDatum)
+            -> Int
+            -> (cot IstatdDatum, cit IstatdDatum)
+            -> m ()
 writeChanNB p n (c, e) = do
   writeChanNU p n e
   void $ liftIO $ replicateM_ n $ readChan c
 
 writeChanNU :: ( MonadIO m
-              , ChanLike cit cot IstatdDatum
-              )
-           => Proxy (cit IstatdDatum)
-           -> Int
-           -> (cit IstatdDatum)
-           -> m ()
+               , ChanLike cit cot IstatdDatum
+               )
+            => Proxy (cit IstatdDatum, cot IstatdDatum)
+            -> Int
+            -> (cit IstatdDatum)
+            -> m ()
 writeChanNU _ n e = do
   replicateM_ n $ writeChan e $ IstatdDatum Counter "CounterName" 0 1
 
 writeChanB :: ( MonadIO m
               , ChanLike cit cot IstatdDatum
               )
-           => Proxy (cit IstatdDatum)
+           => Proxy (cit IstatdDatum, cot IstatdDatum)
            -> (cot IstatdDatum, cit IstatdDatum)
            -> m ()
 writeChanB p (c, e) = do
@@ -192,7 +243,7 @@ writeChanB p (c, e) = do
 writeChanU :: ( MonadIO m
               , ChanLike cit cot IstatdDatum
               )
-           => Proxy (cit IstatdDatum)
+           => Proxy (cit IstatdDatum, cot IstatdDatum)
            -> (cit IstatdDatum)
            -> m ()
 writeChanU _ e = do

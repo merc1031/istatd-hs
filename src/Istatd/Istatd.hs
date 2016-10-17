@@ -84,8 +84,8 @@ mkFilterPipeline :: (MonadIO m)
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
 mkFilterDifference :: ( MonadIO m
-                      , ChanLike ci _co IstatdDatum
-                      , ChanLike ci' _co DifferenceCounter
+                      , ChanLike ci co IstatdDatum
+                      , ChanLike ci' co' DifferenceCounter
                       )
                    => DifferenceState
                    -> FilterFuncT (ci IstatdDatum) (ci' DifferenceCounter) m
