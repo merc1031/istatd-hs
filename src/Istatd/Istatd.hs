@@ -26,7 +26,6 @@ module Istatd.Istatd
 )
 where
 
-import            Control.Concurrent.STM
 import            Control.Concurrent              ( threadDelay )
 import            Control.Concurrent.Async        ( async )
 import            Control.Exception.Safe          ( catch )
@@ -48,6 +47,7 @@ import            Istatd.Client                   ( IstatdConfig (..)
 import            Istatd.Datum.DifferenceCounter  ( DifferenceCounter (..)
                                                   , DifferenceState (..)
                                                   , mkDifferenceState
+                                                  , computeDifferenceCounter
                                                   )
 import            Istatd.Types                    ( IstatdDatum(..)
                                                   , IstatdType (..)
@@ -65,7 +65,6 @@ import            Istatd.Control.Monad            ( (<<) )
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
 import qualified  Data.ByteString.Lazy.Builder    as BSLB
-import qualified  Data.HashMap.Strict             as HM
 import qualified  Data.Time.Clock.POSIX           as POSIX
 
 
@@ -90,18 +89,9 @@ mkFilterDifference :: ( MonadIO m
                       )
                    => DifferenceState
                    -> FilterFuncT (ci IstatdDatum) (ci' DifferenceCounter) m
-mkFilterDifference (DifferenceState stateV) = \out -> do
+mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
-  let action (DifferenceCounter k t v) = do
-        v' <- liftIO $ atomically $ do
-          oldH <- readTVar stateV
-          let diff = case HM.lookup k oldH of
-                Just d -> v - d
-                Nothing -> 0
-          modifyTVar' stateV (\h -> HM.insert k v h)
-          return diff
---        t <- POSIX.getPOSIXTime
-        writeChan out $ IstatdDatum Counter (BSLB.lazyByteString k) t v'
+  let action dc = writeChan out =<< computeDifferenceCounter dstate dc
   go $ forever $ action =<< readChan outC
   return inC
 
