@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
 module Istatd.Istatd
 ( ChanLike (..)
@@ -13,6 +14,7 @@ module Istatd.Istatd
 , SupportsTime (..)
 , (.<:.)
 , (.:>.)
+, (.:>|.)
 , mkFilterPipeline
 , mkFilterPipelineWithSource
 , mkBuffer
@@ -88,9 +90,11 @@ import            Istatd.Types                        ( IstatdDatum(..)
 
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
+import CompoundTypes.Lazy
 
 infixr 1 .:>.
 infixr 1 .<:.
+infixr 1 .:>|.
 
 -- | Type Specific `>=>`
 (.:>.)
@@ -109,6 +113,14 @@ fl .:>. fr = fl >=> fr
   -> ci di
   -> m ( ci diii )
 fl .<:. fr = fl <=< fr
+
+(.:>|.)
+  :: (Monad m)
+  => FilterFuncT (ci IstatdDatum) (ci dii) m
+  -> FilterFuncT (ci dii) (ci diii) m
+  -> ci IstatdDatum
+  -> m ( ci diii )
+fl .:>|. fr = fl >=> fr
 
 
 -- | Composes a sink, a specific (possibly differently typed) source, and many
@@ -136,13 +148,14 @@ mkFilterPipeline sink fs =
 mkFilterDifference
   :: ( MonadIO m
      , ChanLike ci co IstatdDatum
-     , ChanLike ci' co' DifferenceCounter
+     , ChanLike ci' co' (DifferenceCounter + IstatdDatum)
      )
   => DifferenceState
-  -> FilterFuncT (ci IstatdDatum) (ci' DifferenceCounter) m
+  -> FilterFuncT (ci IstatdDatum) (ci' (DifferenceCounter + IstatdDatum)) m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
-  let action dc = writeChan out =<< computeDifferenceCounter dstate dc
+  let action (Sum2_1 dc) = writeChan out =<< computeDifferenceCounter dstate dc
+      action (Sum2_2 ic) = writeChan out ic
   go_ $ forever $ action =<< readChan outC
   return inC
 

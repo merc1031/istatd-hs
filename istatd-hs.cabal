@@ -35,6 +35,7 @@ library
                      , async
                      , auto-update
                      , bytestring
+                     , compound-types
                      , containers
                      , deepseq
                      , double-conversion
@@ -62,6 +63,7 @@ executable istatd-hs-exe
   build-depends:       base
                      , istatd-hs
 
+                     , compound-types
                      , time
                      , random
   default-language:    Haskell2010
@@ -73,6 +75,7 @@ test-suite istatd-hs-test
   build-depends:       base
                      , istatd-hs
 
+                     , compound-types
                      , exceptions
                      , hspec
                      , hspec-discover
@@ -92,6 +95,7 @@ benchmark istatd-hs-benchmark
   build-depends:       base
                      , istatd-hs
 
+                     , compound-types
                      , criterion
                      , deepseq
                      , exceptions

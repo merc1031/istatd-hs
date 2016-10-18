@@ -9,6 +9,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 module Istatd.IstatdSpec where
 
+import            CompoundTypes.Lazy
 import            Control.Concurrent.STM
 import            Control.Exception                 ( catch )
 import            Control.Monad                     ( replicateM_
@@ -216,7 +217,7 @@ spec = do
       (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
         dstate <- mkDifferenceState
         (tchan, pipeline) <- mkPipeEnvWithSource (mkFilterDifference dstate) []
-        forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
+        forM_ [1..10000] $ \v -> writeChan pipeline $ Sum2_1 $ DifferenceCounter "CounterName" 0 v
         res <- readChan tchan
         res' <- replicateM 9999 $ readChan tchan
         ensureNoLeftovers tchan
@@ -227,7 +228,7 @@ spec = do
       (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
         dstate <- mkDifferenceState
         (tchan, pipeline) <- mkPipeEnvWithSource (mkFilterDifference dstate) [mkFilterPrefix "a", mkFilterSuffix "c", mkBuffer 1000]
-        forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
+        forM_ [1..10000] $ \v -> writeChan pipeline $ Sum2_1 $ DifferenceCounter "CounterName" 0 v
         res <- readChan tchan
         res' <- replicateM 9999 $ readChan tchan
         ensureNoLeftovers tchan
