@@ -10,6 +10,7 @@ module Istatd.Istatd
 , ChannelException (..)
 , FilterFunc
 , FilterFuncT
+, SupportsTime (..)
 , mkFilterPipeline
 , mkFilterPipelineWithSource
 , mkBuffer
@@ -66,7 +67,8 @@ import            Istatd.Datum.Percentile         ( Percentile
                                                   , computePercentiles
                                                   , addPercentile
                                                   )
-import            Istatd.Tick                     ( tick )
+--import            Istatd.Tick                     ( tick )
+import            Istatd.Time                     ( SupportsTime (..) )
 import            Istatd.Types                    ( IstatdDatum(..)
                                                   , IstatdType (..)
                                                   , FilterFunc
@@ -78,7 +80,7 @@ import            Istatd.Types                    ( IstatdDatum(..)
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
 import qualified  Data.ByteString.Lazy.Builder    as BSLB
-import qualified  Data.Time.Clock.POSIX           as POSIX
+--import qualified  Data.Time.Clock.POSIX           as POSIX
 
 
 
@@ -158,6 +160,7 @@ mkBuffer size = \out -> do
 mkMonitoredBuffer :: ( MonadCatch m
                      , MonadIO m
                      , ChanLike ci co IstatdDatum
+                     , SupportsTime m
                      )
                   => BSLB.Builder
                   -> Int
@@ -169,7 +172,7 @@ mkMonitoredBuffer name size = \out -> do
   let recordAction =
         let channelAction =
               let datum len t = IstatdDatum Gauge name t (fromIntegral len)
-                  writeAction len = writeChan out . datum len =<< POSIX.getPOSIXTime
+                  writeAction len = writeChan out . datum len =<< getPOSIXTime
               in U.readChan ticker >> (writeAction =<< inChanLen inC)
         in go $ forever $ channelAction
   action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
@@ -198,6 +201,7 @@ mkSlowdownBuffer time size = \out -> do
 mkPercentileFilter :: ( MonadCatch m
                       , MonadIO m
                       , ChanLike ci co IstatdDatum
+                      , SupportsTime m
                       )
                    => Int
                    -> [Percentile]

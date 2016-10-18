@@ -22,12 +22,13 @@ import            Data.Monoid                     ( (<>) )
 import            Istatd.Types                    ( IstatdDatum (..)
                                                   , IstatdType (..)
                                                   )
+import            Istatd.Time                     ( SupportsTime (..) )
 
 import qualified  Data.ByteString.Lazy            as BSLC
 import qualified  Data.ByteString.Lazy.Builder    as BSLB
 import qualified  Data.HashMap.Strict             as HM
 import qualified  Data.Sequence                   as Seq
-import qualified  Data.Time.Clock.POSIX           as POSIX
+--import qualified  Data.Time.Clock.POSIX           as POSIX
 
 newtype Percentile = Percentile Int
 newtype PercentileState = PercentileState (TVar (HM.HashMap BSLC.ByteString (Seq.Seq Double)))
@@ -55,7 +56,8 @@ clearPercentiles (PercentileState stateV) =
 
 newtype Sorted a = Sorted (Seq.Seq a)
 
-computePercentile :: MonadIO m
+computePercentile :: (MonadIO m
+                     )
                   => PercentileState
                   -> [Percentile]
                   -> BSLC.ByteString
@@ -68,7 +70,7 @@ computePercentile (PercentileState stateV) percentiles k = do
           Nothing -> Seq.empty
     return s
 
-  t <- liftIO $ POSIX.getPOSIXTime
+  t <- liftIO $ getPOSIXTime
 
   let tooFew :: Int -> Int -> Bool
       tooFew p l = l == 0 || (p < (100 `div` l))
@@ -84,7 +86,7 @@ computePercentile (PercentileState stateV) percentiles k = do
       ctrs = catMaybes $ map (getPercentile sorted) percentiles
   return ctrs
 
-computePercentiles :: MonadIO m
+computePercentiles :: (MonadIO m)
                    => PercentileState
                    -> [Percentile]
                    -> m [IstatdDatum]
