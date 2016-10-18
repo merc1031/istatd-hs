@@ -179,10 +179,10 @@ genBenchGroup' p groupName act actn environment benchmarks =
     where
         mkBench BenchSingle =
           env environment $ \e -> bench "singleWrite" $ nfIO $ do
-            liftIO $ act p e
+            runAppM' $ liftIO $ act p e
         mkBench (BenchNumber n) =
           env environment $ \e -> bench ("write" ++ show n) $ nfIO $ do
-            liftIO $ actn p n e
+            runAppM' $ liftIO $ actn p n e
 
 mkPipeEnv :: ( MonadIO m
              , MonadCatch m

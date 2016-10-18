@@ -1,5 +1,5 @@
 {-# LANGUAGE FlexibleInstances #-}
-module Istatd.Time
+module Istatd.Class.Time
 ( SupportsTime(..)
 )
 where

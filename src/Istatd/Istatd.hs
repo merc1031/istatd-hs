@@ -28,11 +28,13 @@ module Istatd.Istatd
 , mkPercentileFilter
 , mkPercentile
 , mkPercentiles
+, State (..)
+, runAppM
+, runAppM'
 )
 where
 
-import            Control.Concurrent              ( threadDelay )
-import            Control.Concurrent.Async        ( async )
+import            Control.Concurrent.Async.Lifted ( async )
 import            Control.Exception.Safe          ( catch )
 import            Control.Monad                   ( void
                                                   , forever
@@ -45,6 +47,7 @@ import            Control.Monad.Catch             ( MonadCatch )
 import            Control.Monad.IO.Class          ( MonadIO
                                                   , liftIO
                                                   )
+import            Control.Monad.Trans.Control     ( MonadBaseControl )
 import            Data.Monoid                     ( (<>) )
 import            Istatd.Chan.ChanLike            ( ChanLike (..)
                                                   , ChannelException (..)
@@ -67,8 +70,11 @@ import            Istatd.Datum.Percentile         ( Percentile
                                                   , computePercentiles
                                                   , addPercentile
                                                   )
---import            Istatd.Tick                     ( tick )
-import            Istatd.Time                     ( SupportsTime (..) )
+import            Istatd.Monad.Types              ( runAppM
+                                                  , runAppM'
+                                                  , State (..)
+                                                  )
+import            Istatd.Class.Time               ( SupportsTime (..) )
 import            Istatd.Types                    ( IstatdDatum(..)
                                                   , IstatdType (..)
                                                   , FilterFunc
@@ -80,7 +86,6 @@ import            Istatd.Types                    ( IstatdDatum(..)
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
 import qualified  Data.ByteString.Lazy.Builder    as BSLB
---import qualified  Data.Time.Clock.POSIX           as POSIX
 
 
 
@@ -111,7 +116,7 @@ mkFilterDifference :: ( MonadIO m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
   let action dc = writeChan out =<< computeDifferenceCounter dstate dc
-  go $ forever $ action =<< readChan outC
+  go_ $ forever $ action =<< readChan outC
   return inC
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
@@ -125,7 +130,7 @@ mkFilterPrefix prefix = \out -> do
   let action r@(getKey -> k) =
         let nk = prefix <> k
         in writeChan out $ updateKey nk r
-  go $ forever $ action =<< readChan outC
+  go_ $ forever $ action =<< readChan outC
   return inC
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
@@ -139,7 +144,7 @@ mkFilterSuffix suffix = \out -> do
   let action r@(getKey -> k) =
         let nk = k <> suffix
         in writeChan out $ updateKey nk r
-  go $ forever $ action =<< readChan outC
+  go_ $ forever $ action =<< readChan outC
   return inC
 
 -- | Creates a sized buffer for messages going through this pipeline
@@ -151,7 +156,7 @@ mkBuffer :: ( MonadCatch m
          -> FilterFunc (ci IstatdDatum) m
 mkBuffer size = \out -> do
   (inC, outC) <- newBChan size
-  let action = go $ forever $ writeChan out =<< readChan outC
+  let action = go_ $ forever $ writeChan out =<< readChan outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Buffer died" >> return ()
   return inC
 
@@ -161,20 +166,21 @@ mkMonitoredBuffer :: ( MonadCatch m
                      , MonadIO m
                      , ChanLike ci co IstatdDatum
                      , SupportsTime m
+                     , MonadBaseControl IO m
                      )
                   => BSLB.Builder
                   -> Int
                   -> FilterFunc (ci IstatdDatum) m
 mkMonitoredBuffer name size = \out -> do
   (inC, outC) <- newBChan size
-  let action = go $ forever $ writeChan out =<< (readChan outC)
+  let action = go_ $ forever $ writeChan out =<< (readChan outC)
   ticker <- tick 1
   let recordAction =
         let channelAction =
               let datum len t = IstatdDatum Gauge name t (fromIntegral len)
                   writeAction len = writeChan out . datum len =<< getPOSIXTime
-              in U.readChan ticker >> (writeAction =<< inChanLen inC)
-        in go $ forever $ channelAction
+              in (liftIO $ U.readChan ticker) >> (writeAction =<< inChanLen inC)
+        in goM_ $ forever $ channelAction
   action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
   recordAction
   return inC
@@ -184,13 +190,15 @@ mkMonitoredBuffer name size = \out -> do
 mkSlowdownBuffer :: ( MonadCatch m
                     , MonadIO m
                     , ChanLike ci co IstatdDatum
+                    , SupportsTime m
+                    , MonadBaseControl IO m
                     )
                  => Int
                  -> Int
                  -> FilterFunc (ci IstatdDatum) m
 mkSlowdownBuffer time size = \out -> do
   (inC, outC) <- newBChan size
-  let action = go $ forever $ writeChan out =<< (readChan outC << threadDelay time)
+  let action = goM_ $ forever $ writeChan out =<< (readChan outC << threadDelay time)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
   return inC
 
@@ -202,6 +210,7 @@ mkPercentileFilter :: ( MonadCatch m
                       , MonadIO m
                       , ChanLike ci co IstatdDatum
                       , SupportsTime m
+                      , MonadBaseControl IO m
                       )
                    => Int
                    -> [Percentile]
@@ -213,13 +222,13 @@ mkPercentileFilter seconds percentiles = \out -> do
         addPercentile pstate (BSLB.toLazyByteString k) v
         return $ updateKey (k <> BSLB.lazyByteString ".raw") d
       collectPercentile d = return d
-      action = go $ forever $ writeChan out =<< collectPercentile =<< (readChan outC)
+      action = go_ $ forever $ writeChan out =<< collectPercentile =<< (readChan outC)
   ticker <- tick seconds
   let recordAction =
         let channelAction =
               let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ writeChan out
-              in U.readChan ticker >> writeAction >> clearPercentiles pstate
-        in go $ forever $ channelAction
+              in (liftIO $ U.readChan ticker) >> writeAction >> clearPercentiles pstate
+        in goM_ $ forever $ channelAction
   action `catch` \(_ :: ChannelException) -> putStrLnIO "PercentileBuffer died" >> return ()
   recordAction
   return inC
@@ -232,7 +241,7 @@ mkNullRecorder :: ( MonadCatch m
                => m (ci IstatdDatum)
 mkNullRecorder = do
   (inC, outC) <- newZChan
-  let action = go $ forever $ void $ readChan outC
+  let action = go_ $ forever $ void $ readChan outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
@@ -245,7 +254,7 @@ mkPipeRecorder :: ( MonadCatch m
                -> m (ci IstatdDatum)
 mkPipeRecorder c = do
   (inC, outC) <- newZChan
-  let action = go $ forever $ writeChan c =<< (readChan outC)
+  let action = go_ $ forever $ writeChan c =<< (readChan outC)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
@@ -257,7 +266,7 @@ mkPrintingRecorder :: ( MonadCatch m
                    => m (ci IstatdDatum)
 mkPrintingRecorder = do
   (inC, outC) <- newZChan
-  let action = go $ forever $ putStrLn . show =<< readChan outC
+  let action = go_ $ forever $ putStrLn . show =<< readChan outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
@@ -269,7 +278,7 @@ mkPrintingEncodedRecorder :: ( MonadCatch m
                           => m (ci IstatdDatum)
 mkPrintingEncodedRecorder = do
   (inC, outC) <- newZChan
-  let action = go $ forever $ putStrLn . show . toPacket =<< readChan outC
+  let action = go_ $ forever $ putStrLn . show . toPacket =<< readChan outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
@@ -284,7 +293,7 @@ mkIstatdRecorder config = do
   (inC, outC) <- newZChan
   connection <- connect config
   let send' p = send connection [p]
-  let action = go $ forever $ send' =<< readChan outC
+  let action = go_ $ forever $ send' =<< readChan outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
@@ -296,7 +305,12 @@ putStrLnIO :: (MonadIO m)
 putStrLnIO = liftIO . putStrLn
 
 -- @treed
-go :: MonadIO m
-   => IO a
-   -> m ()
-go = liftIO . void . async
+go_ :: MonadIO m
+    => IO a
+    -> m ()
+go_ = liftIO . void . async
+
+goM_ :: MonadBaseControl IO m
+     => m a
+     -> m ()
+goM_ = void . async

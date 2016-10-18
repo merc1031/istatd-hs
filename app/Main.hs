@@ -1,17 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
-import            Control.Concurrent      ( threadDelay )
 import            Control.Monad           ( forever )
+import            Control.Monad.IO.Class  ( liftIO )
 import            Istatd.Istatd
 import            System.Random
 
-import qualified  Data.Time.Clock.POSIX   as POSIX
 import qualified  Istatd.Chan.ChanT       as ChanT
 
 main :: IO ()
-main = do
-  sink <- mkPrintingEncodedRecorder :: IO (ChanT.InChanI IstatdDatum)
+main = runAppM' $ do
+  (sink :: ChanT.InChanI IstatdDatum) <- mkPrintingEncodedRecorder
   stats <- mkFilterPipeline sink [ mkMonitoredBuffer "monitor" 5
                                  , mkFilterPrefix "Hi."
                                  , mkFilterSuffix ".no"
@@ -26,10 +26,10 @@ main = do
                                           ]
 
   forever $ do
-    t <- POSIX.getPOSIXTime
+    t <- getPOSIXTime
     writeChan stats (IstatdDatum Counter "name" t 100)
 
-    r <- getStdRandom (randomR (1,6 :: Double))
+    r <- liftIO $ getStdRandom (randomR (1,6 :: Double))
 
     writeChan percetilestats (IstatdDatum Gauge "gaugy" t r)
     writeChan percetilestats (IstatdDatum Counter "countery" t r)

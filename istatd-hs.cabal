@@ -1,13 +1,13 @@
 name:                istatd-hs
 version:             0.1.0.0
-synopsis:            Initial project template from stack
+synopsis:            Channel base istatd interface
 description:         Please see README.md
-homepage:            https://github.com/githubuser/istatd-hs#readme
+homepage:            https://github.com/merc1031/istatd-hs#readme
 license:             BSD3
 license-file:        LICENSE
-author:              Author name here
-maintainer:          example@example.com
-copyright:           2016 Author name here
+author:              Leonidas Loucas
+maintainer:          merc1031@gmail.com
+copyright:           2016 Leonidas Loucas
 category:            Web
 build-type:          Simple
 -- extra-source-files:
@@ -17,36 +17,40 @@ library
   hs-source-dirs:      src
   ghc-options:         -Wall -Werror
   ghc-options:         -O2
-  exposed-modules:     Istatd.Istatd
-                     , Istatd.Chan.Chan
-                     , Istatd.Chan.ChanT
+  exposed-modules:     Istatd.Chan.Chan
                      , Istatd.Chan.ChanLike
+                     , Istatd.Chan.ChanT
+                     , Istatd.Class.Time
                      , Istatd.Client
+                     , Istatd.Control.Monad
                      , Istatd.Datum.DifferenceCounter
                      , Istatd.Datum.Percentile
+                     , Istatd.Istatd
+                     , Istatd.Monad.Types
                      , Istatd.Tick
-                     , Istatd.Time
                      , Istatd.Types
-                     , Istatd.Control.Monad
+
   build-depends:       base >= 4.7 && < 5
+
+                     , async
                      , auto-update
                      , bytestring
+                     , containers
+                     , deepseq
                      , double-conversion
                      , exceptions
-                     , stm
-                     , stm-chans
-                     , unagi-chan
+                     , lifted-async
+                     , monad-control
                      , mtl
-                     , async
-                     , deepseq
-                     , text
-                     , time
                      , network
                      , safe-exceptions
+                     , stm
+                     , stm-chans
+                     , text
+                     , time
+                     , transformers-base
+                     , unagi-chan
                      , unordered-containers
-                     , containers
-                     , vector
-                     , vector-algorithms
   default-language:    Haskell2010
 
 executable istatd-hs-exe
@@ -57,6 +61,7 @@ executable istatd-hs-exe
   ghc-options:         -O2
   build-depends:       base
                      , istatd-hs
+
                      , time
                      , random
   default-language:    Haskell2010
@@ -67,12 +72,16 @@ test-suite istatd-hs-test
   main-is:             Spec.hs
   build-depends:       base
                      , istatd-hs
+
                      , exceptions
                      , hspec
                      , hspec-discover
-                     , unagi-chan
-                     , time
+                     , monad-control
                      , mtl
+                     , stm
+                     , time
+                     , transformers-base
+                     , unagi-chan
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   default-language:    Haskell2010
 
@@ -82,15 +91,17 @@ benchmark istatd-hs-benchmark
   main-is:             Benchmarks.hs
   build-depends:       base
                      , istatd-hs
-                     , exceptions
-                     , deepseq
-                     , time
+
                      , criterion
+                     , deepseq
+                     , exceptions
+                     , time
   ghc-options:         -threaded -rtsopts -with-rtsopts=-N
   ghc-options:         -Wall -Werror
   ghc-options:         -with-rtsopts=-T
   ghc-options:         -O2
   default-language:    Haskell2010
+
 source-repository head
   type:     git
-  location: https://github.com/githubuser/istatd-hs
+  location: https://github.com/merc1031/istatd-hs
