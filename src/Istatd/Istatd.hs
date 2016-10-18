@@ -82,6 +82,8 @@ import qualified  Data.Time.Clock.POSIX           as POSIX
 
 
 
+-- | Composes a sink, a specific (possibly differently typed) source, and many
+-- filters of the sink type into a new sink.
 mkFilterPipelineWithSource :: (MonadIO m)
                            => ci IstatdDatum
                            -> FilterFuncT (ci IstatdDatum) (ci' a) m
@@ -89,13 +91,15 @@ mkFilterPipelineWithSource :: (MonadIO m)
                            -> m (ci' a)
 mkFilterPipelineWithSource sink source fs = source <=< foldr (>=>) return fs $ sink
 
-
+-- | Composes a sink and many filters of the sink type into a new sink.
 mkFilterPipeline :: (MonadIO m)
                  => ci IstatdDatum
                  -> [FilterFunc (ci IstatdDatum) m]
                  -> m (ci IstatdDatum)
 mkFilterPipeline sink fs = foldr (>=>) return fs $ sink
 
+-- | Difference filter. Allows the recording of monotonically increasing counters as
+-- the rate at which they change. Needs to come first in a pipeline, see `mkFilterPipelineWithSource`.
 mkFilterDifference :: ( MonadIO m
                       , ChanLike ci co IstatdDatum
                       , ChanLike ci' co' DifferenceCounter
@@ -108,6 +112,7 @@ mkFilterDifference dstate = \out -> do
   go $ forever $ action =<< readChan outC
   return inC
 
+-- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterPrefix :: ( MonadIO m
                   , ChanLike ci co IstatdDatum
                   )
@@ -121,6 +126,7 @@ mkFilterPrefix prefix = \out -> do
   go $ forever $ action =<< readChan outC
   return inC
 
+-- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterSuffix :: ( MonadIO m
                   , ChanLike ci co IstatdDatum
                   )
@@ -134,6 +140,7 @@ mkFilterSuffix suffix = \out -> do
   go $ forever $ action =<< readChan outC
   return inC
 
+-- | Creates a sized buffer for messages going through this pipeline
 mkBuffer :: ( MonadCatch m
             , MonadIO m
             , ChanLike ci co IstatdDatum
@@ -146,6 +153,8 @@ mkBuffer size = \out -> do
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Buffer died" >> return ()
   return inC
 
+-- | Creates a sized buffer for messages going through this pipeline ala `mkBuffer`. Additionally
+-- records its own length every 1 second to the pipeline.
 mkMonitoredBuffer :: ( MonadCatch m
                      , MonadIO m
                      , ChanLike ci co IstatdDatum
@@ -167,6 +176,8 @@ mkMonitoredBuffer name size = \out -> do
   recordAction
   return inC
 
+-- | Creates a sized buffer for messages going through this pipeline ala `mkBuffer`. Additionally
+-- applies a microsecond delay to the messages
 mkSlowdownBuffer :: ( MonadCatch m
                     , MonadIO m
                     , ChanLike ci co IstatdDatum
@@ -180,6 +191,10 @@ mkSlowdownBuffer time size = \out -> do
   action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
   return inC
 
+-- | Internally accumulates and computes percentile data for gauges that pass through this pipline.
+-- The internal accumulation will be reported and flushed every n seconds.
+-- The original gauge will have .raw appended to its name, and a number of other gauages
+-- will be reported using the format 'key.{percentile}th'
 mkPercentileFilter :: ( MonadCatch m
                       , MonadIO m
                       , ChanLike ci co IstatdDatum
@@ -190,7 +205,9 @@ mkPercentileFilter :: ( MonadCatch m
 mkPercentileFilter seconds percentiles = \out -> do
   (inC, outC) <- newZChan
   pstate <- mkPercentileState
-  let collectPercentile d@(IstatdDatum Gauge k _ v) = addPercentile pstate (BSLB.toLazyByteString k) v >> (return $ updateKey (k <> BSLB.lazyByteString ".raw") d)
+  let collectPercentile d@(IstatdDatum Gauge k _ v) = do
+        addPercentile pstate (BSLB.toLazyByteString k) v
+        return $ updateKey (k <> BSLB.lazyByteString ".raw") d
       collectPercentile d = return d
       action = go $ forever $ writeChan out =<< collectPercentile =<< (readChan outC)
   ticker <- tick seconds
@@ -203,6 +220,7 @@ mkPercentileFilter seconds percentiles = \out -> do
   recordAction
   return inC
 
+-- | Simple sink, Reads the pipeline into void
 mkNullRecorder :: ( MonadCatch m
                   , MonadIO m
                   , ChanLike ci co IstatdDatum
@@ -214,6 +232,7 @@ mkNullRecorder = do
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
+-- | A sink that allows a channel to be passed in and handled elsewhere
 mkPipeRecorder :: ( MonadCatch m
                   , MonadIO m
                   , ChanLike ci co IstatdDatum
@@ -226,6 +245,7 @@ mkPipeRecorder c = do
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
+-- | A sink that prints to stdout using show
 mkPrintingRecorder :: ( MonadCatch m
                       , MonadIO m
                       , ChanLike ci co IstatdDatum
@@ -237,6 +257,7 @@ mkPrintingRecorder = do
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
+-- | A sink that prints to stdout using `toPacket`
 mkPrintingEncodedRecorder :: ( MonadCatch m
                              , MonadIO m
                              , ChanLike ci co IstatdDatum
@@ -248,6 +269,7 @@ mkPrintingEncodedRecorder = do
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
+-- | A sink the record to an istatd agent
 mkIstatdRecorder :: ( MonadCatch m
                     , MonadIO m
                     , ChanLike ci co IstatdDatum
