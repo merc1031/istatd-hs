@@ -14,9 +14,10 @@ import            Control.Monad.IO.Class          ( MonadIO
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
 
-tick :: (MonadIO m)
-     => Int
-     -> m (U.OutChan ())
+tick
+  :: (MonadIO m)
+  => Int
+  -> m (U.OutChan ())
 tick d = liftIO $ do
   (i, o) <- U.newChan
   let action = U.writeChan i ()

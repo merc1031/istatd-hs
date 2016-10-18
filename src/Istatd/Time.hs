@@ -4,7 +4,7 @@ module Istatd.Time
 )
 where
 
-import qualified Data.Time.Clock.POSIX as POSIX
+import qualified  Data.Time.Clock.POSIX           as POSIX
 import qualified  Control.Concurrent.Chan.Unagi   as U
 
 class Monad m => SupportsTime m where

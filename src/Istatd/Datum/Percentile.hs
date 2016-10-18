@@ -29,39 +29,46 @@ import qualified  Data.ByteString.Lazy.Builder    as BSLB
 import qualified  Data.HashMap.Strict             as HM
 import qualified  Data.Sequence                   as Seq
 
-newtype Percentile = Percentile Int
+newtype Percentile      = Percentile Int
 newtype PercentileState = PercentileState (TVar (HM.HashMap BSLC.ByteString (Seq.Seq Double)))
 
-mkPercentiles :: [Int]
-              -> [Percentile]
-mkPercentiles is = catMaybes $ map mkPercentile is
+mkPercentiles
+  :: [Int]
+  -> [Percentile]
+mkPercentiles is =
+  catMaybes $ map mkPercentile is
 
-mkPercentile :: Int
-             -> Maybe Percentile
+mkPercentile
+  :: Int
+  -> Maybe Percentile
 mkPercentile i
   | i >= 0 && i <= 100 = Just $ Percentile i
   | otherwise = Nothing
 
 
-mkPercentileState :: MonadIO m
-                  => m PercentileState
-mkPercentileState = PercentileState <$> (liftIO $ newTVarIO HM.empty)
+mkPercentileState
+  :: MonadIO m
+  => m PercentileState
+mkPercentileState =
+  PercentileState <$> (liftIO $ newTVarIO HM.empty)
 
-clearPercentiles :: MonadIO m
-                 => PercentileState
-                 -> m ()
+clearPercentiles
+  :: MonadIO m
+  => PercentileState
+  -> m ()
 clearPercentiles (PercentileState stateV) =
   liftIO $ atomically $ modifyTVar' stateV $ const HM.empty
 
 newtype Sorted a = Sorted (Seq.Seq a)
 
-computePercentile :: ( MonadIO m
-                     , SupportsTime m
-                     )
-                  => PercentileState
-                  -> [Percentile]
-                  -> BSLC.ByteString
-                  -> m [IstatdDatum]
+computePercentile
+  :: ( MonadIO m
+     , SupportsTime m
+     )
+  => PercentileState
+  -> [Percentile]
+  -> BSLC.ByteString
+  -> m [IstatdDatum]
 computePercentile (PercentileState stateV) percentiles k = do
   samples <- liftIO $ atomically $ do
     oldH <- readTVar stateV
@@ -86,12 +93,13 @@ computePercentile (PercentileState stateV) percentiles k = do
       ctrs = catMaybes $ map (getPercentile sorted) percentiles
   return ctrs
 
-computePercentiles :: ( MonadIO m
-                      , SupportsTime m
-                      )
-                   => PercentileState
-                   -> [Percentile]
-                   -> m [IstatdDatum]
+computePercentiles
+  :: ( MonadIO m
+     , SupportsTime m
+     )
+  => PercentileState
+  -> [Percentile]
+  -> m [IstatdDatum]
 computePercentiles pstate@(PercentileState stateV) percentiles = do
   keys <- liftIO $ atomically $ do
     oldH <- readTVar stateV
@@ -100,11 +108,12 @@ computePercentiles pstate@(PercentileState stateV) percentiles = do
   ctrs <- forM keys $ \k -> computePercentile pstate percentiles k
   return $ concat ctrs
 
-addPercentile :: MonadIO m
-              => PercentileState
-              -> BSLC.ByteString
-              -> Double
-              -> m ()
+addPercentile
+  :: MonadIO m
+  => PercentileState
+  -> BSLC.ByteString
+  -> Double
+  -> m ()
 addPercentile (PercentileState stateV) k v = do
   liftIO $ atomically $ do
     oldH <- readTVar stateV

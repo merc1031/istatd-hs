@@ -18,12 +18,14 @@ import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.Double.Conversion.ByteString   as PrintDouble
 import qualified  Data.Time.Clock.POSIX               as POSIX
 
-data IstatdType = Counter
-                | Gauge
-                deriving (Show, Eq)
+data IstatdType =
+    Counter
+  | Gauge
+  deriving (Show, Eq)
 
 
-data IstatdDatum = IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double
+data IstatdDatum =
+  IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double
 
 type FilterFunc c m = (c -> m c)
 type FilterFuncT ci co m = (ci -> m co)
@@ -50,14 +52,16 @@ instance Eq IstatdDatum where
     d == d'
 
 
-toPacket :: IstatdDatum
-         -> BS.ByteString
+toPacket
+  :: IstatdDatum
+  -> BS.ByteString
 toPacket datum =
   BSL.toStrict . BSLB.toLazyByteString $ encode datum
 
 -- | Serializes an istatd packet as a ByteString.
-encode :: IstatdDatum
-       -> BSLB.Builder
+encode
+  :: IstatdDatum
+  -> BSLB.Builder
 encode (IstatdDatum ptype name _t value) =
   prefix <>
   name <>
