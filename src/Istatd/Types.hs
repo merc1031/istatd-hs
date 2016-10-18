@@ -1,8 +1,12 @@
+{-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 module Istatd.Types
 ( IstatdDatum (..)
 , IstatdType (..)
 , FilterFunc
 , FilterFuncT
+, AnyFilterFunc (..)
 , getKey
 , updateKey
 , toPacket
@@ -10,6 +14,10 @@ module Istatd.Types
 where
 
 import            Data.Monoid                         ( (<>) )
+import            Istatd.ChanData                     ( InData (..)
+                                                      , OutData (..)
+                                                      , OutConstraint
+                                                      )
 
 import qualified  Data.ByteString                     as BS
 import qualified  Data.ByteString.Lazy                as BSL
@@ -17,6 +25,17 @@ import qualified  Data.ByteString.Lazy.Char8          as BSLC
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.Double.Conversion.ByteString   as PrintDouble
 import qualified  Data.Time.Clock.POSIX               as POSIX
+
+type instance OutConstraint IstatdDatum IstatdDatum m = Monad m
+instance InData IstatdDatum IstatdDatum where
+  type OutState IstatdDatum IstatdDatum = ()
+  getKey (IstatdDatum _ k _ _) = k
+  updateKey (IstatdDatum it _k t d) k =
+    IstatdDatum it k t d
+  toOutData a _ = return a
+
+instance OutData IstatdDatum where
+  getValue (IstatdDatum _ _ _ v) = v
 
 data IstatdType =
     Counter
@@ -27,8 +46,10 @@ data IstatdType =
 data IstatdDatum =
   IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double
 
-type FilterFunc c m = (c -> m c)
+type FilterFunc c m = FilterFuncT c c m
 type FilterFuncT ci co m = (ci -> m co)
+
+data AnyFilterFunc = forall ci co m. (InData ci co, OutData co) => AnyFilterFunc (FilterFuncT ci co m)
 
 instance Show IstatdDatum where
   show (IstatdDatum it k t d) =
@@ -74,12 +95,12 @@ encode (IstatdDatum ptype name _t value) =
         Gauge -> mempty
 {-# INLINE encode #-}
 
-getKey :: IstatdDatum
-       -> BSLB.Builder
-getKey (IstatdDatum _ k _ _) = k
-
-updateKey :: BSLB.Builder
-          -> IstatdDatum
-          -> IstatdDatum
-updateKey k (IstatdDatum c _k t i) =
-  IstatdDatum c k t i
+--getKey :: IstatdDatum
+--       -> BSLB.Builder
+--getKey (IstatdDatum _ k _ _) = k
+--
+--updateKey :: BSLB.Builder
+--          -> IstatdDatum
+--          -> IstatdDatum
+--updateKey k (IstatdDatum c _k t i) =
+--  IstatdDatum c k t i

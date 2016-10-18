@@ -1,3 +1,6 @@
+{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TypeFamilies #-}
 module Istatd.Datum.DifferenceCounter
 ( DifferenceCounter (..)
 , DifferenceState (..)
@@ -14,6 +17,10 @@ import            Istatd.Types                        ( IstatdDatum (..)
                                                       , IstatdType (..)
                                                       )
 
+import            Istatd.ChanData                     ( InData (..)
+                                                      , OutConstraint
+                                                      )
+
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.ByteString.Lazy.Char8          as BSLC
 import qualified  Data.HashMap.Strict                 as HM
@@ -21,6 +28,14 @@ import qualified  Data.Time.Clock.POSIX               as POSIX
 
 data DifferenceCounter  = DifferenceCounter !BSLC.ByteString !POSIX.POSIXTime !Double
 newtype DifferenceState = DifferenceState (TVar (HM.HashMap BSLC.ByteString Double))
+
+type instance OutConstraint DifferenceCounter IstatdDatum m = MonadIO m
+instance InData DifferenceCounter IstatdDatum where
+  type OutState DifferenceCounter IstatdDatum = DifferenceState
+  getKey (DifferenceCounter k _ _) = BSLB.lazyByteString k
+  updateKey (DifferenceCounter _k t v) k = (DifferenceCounter (BSLB.toLazyByteString k) t v)
+  toOutData :: MonadIO m => DifferenceCounter -> DifferenceState -> m IstatdDatum
+  toOutData a s = computeDifferenceCounter s a
 
 mkDifferenceState
   :: MonadIO m

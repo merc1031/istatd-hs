@@ -11,7 +11,11 @@ module Istatd.Istatd
 , FilterFunc
 , FilterFuncT
 , SupportsTime (..)
+, InData (..)
+, OutData (..)
 , mkFilterPipeline
+, (.:>.)
+, (.<:.)
 , mkFilterPipelineWithSource
 , mkBuffer
 , mkFilterPrefix
@@ -49,6 +53,9 @@ import            Control.Monad.IO.Class              ( MonadIO
                                                       )
 import            Control.Monad.Trans.Control         ( MonadBaseControl )
 import            Data.Monoid                         ( (<>) )
+import            Istatd.ChanData                     ( InData (..)
+                                                      , OutData (..)
+                                                      )
 import            Istatd.Chan.ChanLike                ( ChanLike (..)
                                                       , ChannelException (..)
                                                       )
@@ -87,12 +94,45 @@ import            Istatd.Types                        ( IstatdDatum(..)
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 
+infixr 1 .:>.
+infixr 1 .<:.
 
+(.:>.)
+  :: ( Monad m
+--     , InData diii dii
+--     , InData dii di
+--     , OutData di
+     )
+  => FilterFuncT (ci di) (ci dii) m
+  -> FilterFuncT (ci dii) (ci diii) m
+  -> ci di
+  -> m ( ci diii )
+fl .:>. fr = fl >=> fr
+
+(.<:.)
+  :: ( Monad m
+--     , InData diii dii
+--     , InData dii di
+--     , OutData di
+     )
+  => FilterFuncT (ci dii) (ci diii) m
+  -> FilterFuncT (ci di) (ci dii) m
+  -> ci di
+  -> m ( ci diii )
+fl .<:. fr = fl <=< fr
+
+--mkFilterPipelineAny
+--  :: ( MonadIO m
+--     , InData a b
+--     )
+--  => [AnyFilterFunc]
+--  -> m (ci a)
 
 -- | Composes a sink, a specific (possibly differently typed) source, and many
 -- filters of the sink type into a new sink.
 mkFilterPipelineWithSource
-  :: (MonadIO m)
+  :: ( MonadIO m
+     )
   => ci IstatdDatum
   -> FilterFuncT (ci IstatdDatum) (ci' a) m
   -> [FilterFunc (ci IstatdDatum) m]
@@ -135,7 +175,7 @@ mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
   let action r@(getKey -> k) =
         let nk = prefix <> k
-        in writeChan out $ updateKey nk r
+        in writeChan out $ updateKey r nk
   go_ $ forever $ action =<< readChan outC
   return inC
 
@@ -150,7 +190,7 @@ mkFilterSuffix suffix = \out -> do
   (inC, outC) <- newZChan
   let action r@(getKey -> k) =
         let nk = k <> suffix
-        in writeChan out $ updateKey nk r
+        in writeChan out $ updateKey r nk
   go_ $ forever $ action =<< readChan outC
   return inC
 
@@ -231,7 +271,7 @@ mkPercentileFilter seconds percentiles = \out -> do
   pstate <- mkPercentileState
   let collectPercentile d@(IstatdDatum Gauge k _ v) = do
         addPercentile pstate (BSLB.toLazyByteString k) v
-        return $ updateKey (k <> BSLB.lazyByteString ".raw") d
+        return $ updateKey d (k <> BSLB.lazyByteString ".raw")
       collectPercentile d = return d
       action = go_ $ forever $ writeChan out =<< collectPercentile =<< (readChan outC)
   ticker <- tick seconds

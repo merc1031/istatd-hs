@@ -36,16 +36,27 @@ import qualified  Data.Time.Clock.POSIX             as POSIX
 import qualified  Istatd.Chan.Chan                  as Chan
 import qualified  Istatd.Chan.ChanT                 as ChanT
 
-mkPipeEnv
+mkPipeEnv'
   :: ( MonadIO m
      , MonadCatch m
      )
-  => [FilterFunc (ChanT.InChanI IstatdDatum) m]
-  -> m (ChanT.OutChanI IstatdDatum, ChanT.InChanI IstatdDatum)
+  => m (ChanT.OutChanI IstatdDatum, ChanT.InChanI IstatdDatum)
+mkPipeEnv' = do
+  (inC, outC) <- newZChan
+  sink <- mkPipeRecorder inC
+  return (outC, sink)
+
+mkPipeEnv
+  :: ( MonadIO m
+     , MonadCatch m
+     , InData d IstatdDatum
+     )
+  => FilterFuncT (ChanT.InChanI IstatdDatum) (ChanT.InChanI d) m
+  -> m (ChanT.OutChanI IstatdDatum, ChanT.InChanI d)
 mkPipeEnv ps = do
   (inC, outC) <- newZChan
   sink <- mkPipeRecorder inC
-  fp <- mkFilterPipeline sink ps
+  fp <- ps sink
   return (outC, fp)
 
 mkPipeEnvWithSource
@@ -118,7 +129,7 @@ spec = do
   describe "filterPrefix" $ do
     it "adds a prefix to the counter" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [mkFilterPrefix "a"]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterPrefix "a"
         writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- readChan tchan
         ensureNoLeftovers tchan
@@ -126,10 +137,10 @@ spec = do
       res `shouldBe` (IstatdDatum Counter "aCounterName" 0 1)
     it "adds prefixes to the counter in order" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [ mkFilterPrefix "c"
-                                       , mkFilterPrefix "b"
-                                       , mkFilterPrefix "a"
-                                       ]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterPrefix "c"
+                                    .:>. mkFilterPrefix "b"
+                                    .:>. mkFilterPrefix "a"
+
         writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- readChan tchan
         ensureNoLeftovers tchan
@@ -137,7 +148,7 @@ spec = do
       res `shouldBe` (IstatdDatum Counter "cbaCounterName" 0 1)
     it "adds suffix to the counter" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [mkFilterSuffix "a"]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterSuffix "a"
         writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- readChan tchan
         ensureNoLeftovers tchan
@@ -145,10 +156,10 @@ spec = do
       res `shouldBe` (IstatdDatum Counter "CounterNamea" 0 1)
     it "adds suffixes to the counter in order" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [ mkFilterSuffix "c"
-                                    , mkFilterSuffix "b"
-                                    , mkFilterSuffix "a"
-                                    ]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterSuffix "c"
+                                    .:>. mkFilterSuffix "b"
+                                    .:>. mkFilterSuffix "a"
+
         writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- readChan tchan
         ensureNoLeftovers tchan
@@ -156,9 +167,9 @@ spec = do
       res `shouldBe` (IstatdDatum Counter "CounterNameabc" 0 1)
     it "adds prefix and suffix to the counter" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [ mkFilterSuffix "b"
-                                    , mkFilterPrefix "a"
-                                    ]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterSuffix "b"
+                                    .:>. mkFilterPrefix "a"
+
         writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- readChan tchan
         ensureNoLeftovers tchan
@@ -166,9 +177,9 @@ spec = do
       res `shouldBe` (IstatdDatum Counter "aCounterNameb" 0 1)
     it "adds suffix and prefix to the counter" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [ mkFilterPrefix "b"
-                                    , mkFilterSuffix "a"
-                                    ]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterPrefix "b"
+                                    .:>. mkFilterSuffix "a"
+
         writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- readChan tchan
         ensureNoLeftovers tchan
@@ -176,13 +187,13 @@ spec = do
       res `shouldBe` (IstatdDatum Counter "bCounterNamea" 0 1)
     it "adds suffixes and prefixes to the counter in order" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [ mkFilterPrefix "f"
-                                    , mkFilterSuffix "e"
-                                    , mkFilterSuffix "d"
-                                    , mkFilterPrefix "c"
-                                    , mkFilterPrefix "b"
-                                    , mkFilterSuffix "a"
-                                    ]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterPrefix "f"
+                                    .:>. mkFilterSuffix "e"
+                                    .:>. mkFilterSuffix "d"
+                                    .:>. mkFilterPrefix "c"
+                                    .:>. mkFilterPrefix "b"
+                                    .:>. mkFilterSuffix "a"
+
         writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- readChan tchan
         ensureNoLeftovers tchan
@@ -190,7 +201,7 @@ spec = do
       res `shouldBe` (IstatdDatum Counter "fcbCounterNameade" 0 1)
     it "sends all messages through channel" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv []
+        (tchan, pipeline) <- mkPipeEnv'
         replicateM_ 100 $ writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- replicateM 100 $ readChan tchan
         ensureNoLeftovers tchan
@@ -198,7 +209,7 @@ spec = do
       forM_ res $ \r -> r `shouldBe` (IstatdDatum Counter "CounterName" 0 1)
     it "sends all messages through channel of 1000 buffering 100 messages" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [mkBuffer 1000]
+        (tchan, pipeline) <- mkPipeEnv $ mkBuffer 1000
         replicateM_ 100 $ writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- replicateM 100 $ readChan tchan
         ensureNoLeftovers tchan
@@ -206,7 +217,7 @@ spec = do
       forM_ res $ \r -> r `shouldBe` (IstatdDatum Counter "CounterName" 0 1)
     it "sends all messages through channel of 1000 buffering 10000 messages" $ do
       res <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
-        (tchan, pipeline) <- mkPipeEnv [mkBuffer 1000]
+        (tchan, pipeline) <- mkPipeEnv $ mkBuffer 1000
         replicateM_ 10000 $ writeChan pipeline $ IstatdDatum Counter "CounterName" 0 1
         res <- replicateM 10000 $ readChan tchan
         ensureNoLeftovers tchan
@@ -215,7 +226,7 @@ spec = do
     it "difference counters maintain state" $ do
       (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
         dstate <- mkDifferenceState
-        (tchan, pipeline) <- mkPipeEnvWithSource (mkFilterDifference dstate) []
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterDifference dstate
         forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
         res <- readChan tchan
         res' <- replicateM 9999 $ readChan tchan
@@ -226,7 +237,18 @@ spec = do
     it "difference counters maintain state with other filters" $ do
       (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
         dstate <- mkDifferenceState
-        (tchan, pipeline) <- mkPipeEnvWithSource (mkFilterDifference dstate) [mkFilterPrefix "a", mkFilterSuffix "c", mkBuffer 1000]
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterDifference dstate .<:. mkFilterPrefix "a" .:>. mkFilterSuffix "c" .:>. mkBuffer 1000
+        forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
+        res <- readChan tchan
+        res' <- replicateM 9999 $ readChan tchan
+        ensureNoLeftovers tchan
+        return (res, res')
+      res `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 0)
+      forM_ res' $ \r -> r `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 1)
+    it "difference counters don't need to be first?" $ do
+      (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
+        dstate <- mkDifferenceState
+        (tchan, pipeline) <- mkPipeEnv $ mkFilterDifference dstate .:>. mkFilterPrefix "a" .:>. mkFilterSuffix "c" .:>. mkBuffer 1000
         forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
         res <- readChan tchan
         res' <- replicateM 9999 $ readChan tchan
@@ -240,7 +262,7 @@ spec = do
 
       (res, res1, res10, res100) <- runFakeM state $ do
         let ps = mkPercentiles [1, 10, 100]
-        (tchan, pipeline) <- mkPipeEnv [mkPercentileFilter 1 ps]
+        (tchan, pipeline) <- mkPipeEnv $ mkPercentileFilter 1 ps
         forM_ [0..99] $ \v -> writeChan pipeline $ IstatdDatum Gauge "CounterName" 0 v
         res <- replicateM 100 $ readChan tchan
         liftIO $ U.writeChan timerIn ()
