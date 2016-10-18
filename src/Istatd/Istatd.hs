@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
 module Istatd.Istatd
@@ -23,6 +24,9 @@ module Istatd.Istatd
 , mkPipeRecorder
 , mkFilterDifference
 , mkDifferenceState
+, mkPercentileFilter
+, mkPercentile
+, mkPercentiles
 )
 where
 
@@ -31,6 +35,7 @@ import            Control.Concurrent.Async        ( async )
 import            Control.Exception.Safe          ( catch )
 import            Control.Monad                   ( void
                                                   , forever
+                                                  , forM_
                                                   , (=<<)
                                                   , (>=>)
                                                   , (<=<)
@@ -40,15 +45,28 @@ import            Control.Monad.IO.Class          ( MonadIO
                                                   , liftIO
                                                   )
 import            Data.Monoid                     ( (<>) )
+import            Istatd.Chan.ChanLike            ( ChanLike (..)
+                                                  , ChannelException (..)
+                                                  )
 import            Istatd.Client                   ( IstatdConfig (..)
                                                   , connect
                                                   , send
                                                   )
+import            Istatd.Control.Monad            ( (<<) )
 import            Istatd.Datum.DifferenceCounter  ( DifferenceCounter (..)
                                                   , DifferenceState (..)
                                                   , mkDifferenceState
                                                   , computeDifferenceCounter
                                                   )
+import            Istatd.Datum.Percentile         ( Percentile
+                                                  , mkPercentile
+                                                  , mkPercentiles
+                                                  , mkPercentileState
+                                                  , clearPercentiles
+                                                  , computePercentiles
+                                                  , addPercentile
+                                                  )
+import            Istatd.Tick                     ( tick )
 import            Istatd.Types                    ( IstatdDatum(..)
                                                   , IstatdType (..)
                                                   , FilterFunc
@@ -57,11 +75,6 @@ import            Istatd.Types                    ( IstatdDatum(..)
                                                   , getKey
                                                   , toPacket
                                                   )
-import            Istatd.Tick                     ( tick )
-import            Istatd.Chan.ChanLike            ( ChanLike (..)
-                                                  , ChannelException (..)
-                                                  )
-import            Istatd.Control.Monad            ( (<<) )
 
 import qualified  Control.Concurrent.Chan.Unagi   as U
 import qualified  Data.ByteString.Lazy.Builder    as BSLB
@@ -165,6 +178,29 @@ mkSlowdownBuffer time size = \out -> do
   (inC, outC) <- newBChan size
   let action = go $ forever $ writeChan out =<< (readChan outC << threadDelay time)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
+  return inC
+
+mkPercentileFilter :: ( MonadCatch m
+                      , MonadIO m
+                      , ChanLike ci co IstatdDatum
+                      )
+                   => Int
+                   -> [Percentile]
+                   -> FilterFunc (ci IstatdDatum) m
+mkPercentileFilter seconds percentiles = \out -> do
+  (inC, outC) <- newZChan
+  pstate <- mkPercentileState
+  let collectPercentile d@(IstatdDatum Gauge k _ v) = addPercentile pstate (BSLB.toLazyByteString k) v >> (return $ updateKey (k <> BSLB.lazyByteString ".raw") d)
+      collectPercentile d = return d
+      action = go $ forever $ writeChan out =<< collectPercentile =<< (readChan outC)
+  ticker <- tick seconds
+  let recordAction =
+        let channelAction =
+              let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ writeChan out
+              in U.readChan ticker >> writeAction >> clearPercentiles pstate
+        in go $ forever $ channelAction
+  action `catch` \(_ :: ChannelException) -> putStrLnIO "PercentileBuffer died" >> return ()
+  recordAction
   return inC
 
 mkNullRecorder :: ( MonadCatch m

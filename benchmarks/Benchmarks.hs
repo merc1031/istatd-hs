@@ -2,13 +2,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fno-full-laziness #-}
-import            Control.Monad.IO.Class
-import            Control.Monad.Catch             ( MonadCatch )
+import            Control.DeepSeq                 ( NFData )
 import            Control.Monad                   ( void
                                                   , replicateM_
                                                   , forM_
                                                   )
-import            Control.DeepSeq                 ( NFData )
+import            Control.Monad.Catch             ( MonadCatch )
+import            Control.Monad.IO.Class
 import            Criterion.Main
 import            Criterion.Types
 import            Data.Proxy

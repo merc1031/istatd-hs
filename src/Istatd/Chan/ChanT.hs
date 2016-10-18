@@ -11,6 +11,7 @@ import            Control.Concurrent.STM                  ( TVar
                                                           , newTVarIO
                                                           , readTVarIO
                                                           )
+import            Control.DeepSeq                         ( NFData (..) )
 import            Control.Exception                       ( BlockedIndefinitelyOnMVar )
 import            Control.Exception.Safe                  ( handle
                                                           , throwM
@@ -20,7 +21,6 @@ import            Control.Monad.Catch                     ( MonadCatch )
 import            Control.Monad.IO.Class                  ( MonadIO
                                                           , liftIO
                                                           )
-import            Control.DeepSeq                         ( NFData (..) )
 import            Istatd.Chan.ChanLike                    ( ChanLike (..)
                                                           , ChannelException (..)
                                                           )

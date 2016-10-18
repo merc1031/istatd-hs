@@ -23,6 +23,7 @@ library
                      , Istatd.Chan.ChanLike
                      , Istatd.Client
                      , Istatd.Datum.DifferenceCounter
+                     , Istatd.Datum.Percentile
                      , Istatd.Tick
                      , Istatd.Types
                      , Istatd.Control.Monad
@@ -42,6 +43,9 @@ library
                      , network
                      , safe-exceptions
                      , unordered-containers
+                     , containers
+                     , vector
+                     , vector-algorithms
   default-language:    Haskell2010
 
 executable istatd-hs-exe
@@ -53,6 +57,7 @@ executable istatd-hs-exe
   build-depends:       base
                      , istatd-hs
                      , time
+                     , random
   default-language:    Haskell2010
 
 test-suite istatd-hs-test

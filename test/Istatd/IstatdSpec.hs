@@ -4,14 +4,16 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Istatd.IstatdSpec where
 
-import Control.Exception (catch)
-import Control.Monad (replicateM_, forM_)
-import Control.Monad.IO.Class (MonadIO)
-import Control.Monad.Catch (MonadCatch)
-import Test.Hspec
-import Istatd.Istatd
-import qualified Istatd.Chan.ChanT as ChanT
-import qualified Istatd.Chan.Chan as Chan
+import            Control.Exception                 ( catch )
+import            Control.Monad                     ( replicateM_
+                                                    , forM_
+                                                    )
+import            Control.Monad.Catch               ( MonadCatch )
+import            Control.Monad.IO.Class            ( MonadIO )
+import            Istatd.Istatd
+import            Test.Hspec
+import qualified  Istatd.Chan.Chan                  as Chan
+import qualified  Istatd.Chan.ChanT                 as ChanT
 
 mkPipeEnv :: ( MonadIO m
              , MonadCatch m

@@ -10,7 +10,7 @@ import            Control.Concurrent.STM
 import            Control.Monad.IO.Class              ( MonadIO
                                                       , liftIO
                                                       )
-import Istatd.Types                                   ( IstatdDatum (..)
+import            Istatd.Types                        ( IstatdDatum (..)
                                                       , IstatdType (..)
                                                       )
 

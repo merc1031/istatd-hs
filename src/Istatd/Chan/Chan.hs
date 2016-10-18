@@ -5,6 +5,7 @@
 module Istatd.Chan.Chan where
 
 import            Control.Arrow                           ( (***) )
+import            Control.DeepSeq                         ( NFData (..) )
 import            Control.Exception                       ( BlockedIndefinitelyOnMVar )
 import            Control.Exception.Safe                  ( handle
                                                           , throwM
@@ -18,7 +19,6 @@ import            Data.IORef                              ( IORef
                                                           , atomicModifyIORef'
                                                           , newIORef
                                                           )
-import            Control.DeepSeq                         ( NFData (..) )
 import            Istatd.Chan.ChanLike                    ( ChanLike (..)
                                                           , ChannelException (..)
                                                           )
