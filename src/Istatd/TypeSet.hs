@@ -83,13 +83,13 @@ insert :: (
        -> Set r'
 insert elem set = SNext elem set
 
-delete :: (
-          r' ~ SetInsert a r
-          )
-       => a
-       -> Set r
-       -> Set r'
-delete elem set = SNext elem set
+--delete :: (
+--          r' ~ SetInsert a r
+--          )
+--       => a
+--       -> Set r
+--       -> Set r'
+--delete elem set = SNext elem set
 
 singleton :: a -> Set '[a]
 singleton elem = SHead elem

@@ -13,6 +13,8 @@ module Istatd.Istatd
 , SupportsTime (..)
 , (.<:.)
 , (.:>.)
+, (.<<.)
+, (.>>.)
 , mkFilterPipeline
 , mkFilterPipelineWithSource
 , mkBuffer
@@ -89,26 +91,45 @@ import            Istatd.Types                        ( IstatdDatum(..)
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 
-infixr 1 .:>.
+infixl 1 .:>.
 infixr 1 .<:.
 
--- | Type Specific `>=>`
-(.:>.)
+infixr 1 .<<.
+infixr 1 .>>.
+
+(.<<.)
+  :: (Monad m)
+  => FilterFuncT (ci dii) (ci diii) m
+  -> FilterFuncT (ci di) (ci dii) m
+  -> FilterFuncT (ci di) (ci diii) m
+fl .<<. fr = fl <=< fr
+
+(.>>.)
   :: (Monad m)
   => FilterFuncT (ci di) (ci dii) m
   -> FilterFuncT (ci dii) (ci diii) m
-  -> ci di
-  -> m ( ci diii )
-fl .:>. fr = fl >=> fr
+  -> FilterFuncT (ci di) (ci diii) m
+fl .>>. fr = fl >=> fr
 
--- | Type Specific `<=<`
+-- | Type Specific `>=>`
+-- Takes a FilterFunc that will relay a di and take a dii
+-- and another FilterFunc that will relay a dii and take a diii
+-- and a sink that handles di
+-- and returns a diii handler
 (.<:.)
   :: (Monad m)
   => FilterFuncT (ci dii) (ci diii) m
   -> FilterFuncT (ci di) (ci dii) m
-  -> ci di
-  -> m ( ci diii )
+  -> FilterFuncT (ci di) (ci diii) m
 fl .<:. fr = fl <=< fr
+
+-- | Type Specific `<=<`
+(.:>.)
+  :: (Monad m)
+  => FilterFuncT (ci dii) (ci diii) m
+  -> FilterFuncT (ci di) (ci dii) m
+  -> FilterFuncT (ci di) ( ci diii ) m
+fl .:>. fr = fr >=> fl
 
 
 -- | Composes a sink, a specific (possibly differently typed) source, and many
