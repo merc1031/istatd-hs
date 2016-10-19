@@ -12,6 +12,7 @@ import            Control.Monad.IO.Class              ( MonadIO
                                                       )
 import            Istatd.Types                        ( IstatdDatum (..)
                                                       , IstatdType (..)
+                                                      , HasKey (..)
                                                       )
 
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
@@ -21,6 +22,10 @@ import qualified  Data.Time.Clock.POSIX               as POSIX
 
 data DifferenceCounter  = DifferenceCounter !BSLC.ByteString !POSIX.POSIXTime !Double
 newtype DifferenceState = DifferenceState (TVar (HM.HashMap BSLC.ByteString Double))
+
+instance HasKey DifferenceCounter where
+  getKey (DifferenceCounter k _ _) = BSLB.lazyByteString k
+  updateKey (DifferenceCounter _k t v) k = DifferenceCounter (BSLB.toLazyByteString k) t v
 
 mkDifferenceState
   :: MonadIO m
