@@ -1,7 +1,9 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 module Istatd.Istatd
 ( ChanLike (..)
@@ -38,6 +40,8 @@ module Istatd.Istatd
 , runAppM'
 )
 where
+
+import Data.Maybe
 
 import            Control.Concurrent.Async.Lifted     ( async )
 import            Control.Exception.Safe              ( catch )
@@ -87,6 +91,8 @@ import            Istatd.Types                        ( IstatdDatum(..)
                                                       , FilterFuncT
                                                       , toPacket
                                                       )
+
+import            Istatd.TypeSet
 
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
@@ -171,14 +177,23 @@ mkFilterPipeline sink fs =
 -- the rate at which they change. Needs to come first in a pipeline, see `mkFilterPipelineWithSource`.
 mkFilterDifference
   :: ( MonadIO m
-     , ChanLike ci co IstatdDatum
-     , ChanLike ci' co' DifferenceCounter
+     , ChanLike ci co next
+     , ChanLike ci' co' injest
+     , setnext ~ SetFromCompound next
+     , InSet setnext IstatdDatum ~ 'True
+     , injest ~ SetToCompound (SetInsert setnext DifferenceCounter)
      )
   => DifferenceState
-  -> FilterFuncT (ci IstatdDatum) (ci' DifferenceCounter) m
+  -> FilterFuncT (ci next) (ci' injest) m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
-  let action dc = writeChan out =<< computeDifferenceCounter dstate dc
+--  let action dc = writeChan out =<< (((fromJust . gconstr) <$> computeDifferenceCounter dstate dc) :: injest)
+  let action dc = do
+    ida <- computeDifferenceCounter dstate dc
+    let nv = gconstr ida :: Maybe next
+        nv' = fromJust nv
+    writeChan out nv
+
   go_ $ forever $ action =<< readChan outC
   return inC
 
