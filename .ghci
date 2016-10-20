@@ -1,9 +1,25 @@
 :set prompt "> "
 :set -XOverloadedStrings
+:set -XDataKinds
+:set -XExplicitForAll
+:set -XGADTs
+:set -XTypeFamilies
+:set -XTypeOperators
+:set -XPolyKinds
+:set -XKindSignatures
+:set +m
+:set -fprint-explicit-foralls
+:set -fprint-explicit-kinds
+:set -fprint-expanded-synonymns
+:set -ddump-deriv
+:set -ddump-th
 
+import CompoundTypes.Lazy
 import Control.Monad (void, forever, (=<<), (>=>))
 import Data.Foldable (foldrM)
 import Data.IORef
+import Data.Data
+import Data.Proxy
 import Control.Debounce (mkDebounce, defaultDebounceSettings, DebounceSettings (..))
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async)
