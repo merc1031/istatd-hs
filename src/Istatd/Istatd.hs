@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE AllowAmbiguousTypes #-} --- For filter hAskey
 module Istatd.Istatd
 ( ChanLike (..)
 , IstatdDatum (..)
@@ -129,54 +130,76 @@ mkPipelineWithSink sink pipe = do
 -- | Prepend a filter in the pipeline.
 -- Synonym for `.<:.`, analagous to `<=<`
 prependF
-  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
-   . Monad m
-  => FilterFuncT (ci inter) (ci injest) m
-  -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci inter) m
+  :: forall (m :: * -> *) (ci :: * -> *) injest interA interB next
+   . ( Monad m
+     , 'True ~ VariantCompatibility (Variant interA) (Variant interB)
+     )
+  => FilterFuncT (ci (Variant interA)) (ci (Variant injest)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Variant next)) (ci (Variant interB)) m
+  -- ^ Sink end to add to the pipeline chain
+  -> FilterFuncT (ci (Variant next)) (ci (Variant injest)) m
   -- ^ New sink end of the current pipeline chain
 prependF = (.<:.)
 
 -- | Append a filter in the pipeline.
 -- Synonym for `.:>.`, analagous to `>=>`
 appendF
-  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
-   . Monad m
-  => FilterFuncT (ci inter) (ci injest) m
+  :: forall (m :: * -> *) (ci :: * -> *) injest interA interB next
+   . ( Monad m
+     , 'True ~ VariantCompatibility (Variant interA) (Variant interB)
+     )
+  => FilterFuncT (ci (Variant interA)) (ci (Variant injest)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci next) (ci inter) m
+  -> FilterFuncT (ci (Variant next)) (ci (Variant interB)) m
   -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Variant next)) (ci (Variant injest)) m
   -- ^ New sink end of the current pipeline chain
 appendF = (.:>.)
 
 -- | Prepend a filter in the pipeline.
 -- Synonym for `.<:.`, analagous to `<=<`
 (.<:.)
-  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
-   . Monad m
-  => FilterFuncT (ci inter) (ci injest) m
-  -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci inter) m
+  :: forall (m :: * -> *) (ci :: * -> *) injest interA interB next
+   . ( Monad m
+     , 'True ~ VariantCompatibility (Variant interA) (Variant interB)
+     )
+  => FilterFuncT (ci (Variant interA)) (ci (Variant injest)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Variant next)) (ci (Variant interB)) m
+  -- ^ Sink end to add to the pipeline chain
+  -> FilterFuncT (ci (Variant next)) (ci (Variant injest)) m
   -- ^ New sink end of the current pipeline chain
 fl .<:. fr = fl <=< fr
 
 -- | Append a filter in the pipeline.
 -- Synonym for `.:>.`, analagous to `>=>`
 (.:>.)
-  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
-   . Monad m
-  => FilterFuncT (ci inter) (ci injest) m
+  :: forall (m :: * -> *) (ci :: * -> *) injest interA interB next
+   . ( Monad m
+     , 'True ~ VariantCompatibility (Variant interA) (Variant interB)
+     )
+  => FilterFuncT (ci (Variant interA)) (ci (Variant injest)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci next) (ci inter) m
+  -> FilterFuncT (ci (Variant next)) (ci (Variant interB)) m
   -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Variant next)) (ci (Variant injest)) m
   -- ^ New sink end of the current pipeline chain
-fl .:>. fr = fr >=> fl
+fl .:>. fr = \x -> (fr x >>= \y -> fl y)
+
+-- | How should these pipelines work
+--
+--  append a filter lets say we need to sink
+-- IstatdDatum    -------- Variant '[IstatdDatum]
+--  we want to add a buffer
+--  Buffers SHOULD have type   Variant ns  -> Variant ns
+-- then we want to add a monitored buffer
+--  monitored buffers should have type   Varian ns -> Variant ( AtLeast IstatdDatum ns )
+--     this should imply that '[IstatdDatum] is valid,
+--     so its             '[Moreshit,IStatdDatum]
+--     and so is          '[IstatdDatum,Moreshit]
+-- then we want to add a Prefix filter
+-- prefix filter should have type  HasKey a =>     Variant (AtLeast a ns ) -> Variant (AtLeast a ns)
 
 
 -- | Composes a sink, a specific (possibly differently typed) source, and many
@@ -202,10 +225,11 @@ mkFilterPipeline sink fs =
 -- | Difference filter. Allows the recording of monotonically increasing counters as
 -- the rate at which they change. Needs to come first in a pipeline, see `mkFilterPipelineWithSource`.
 mkFilterDifference
-  :: forall m ci co next
+  :: forall m ci co next next'
    . ( MonadIO m
      , ChanLike ci co (Variant next)
-     , ChanLike ci co (Variant (DifferenceCounter ': next))
+     , ChanLike ci co next'
+     , next' ~ (MinVariant (DifferenceCounter ': next))
 ----     , setnext ~ SetFromVariant next
 --     , InVariant injest IstatdDatum ~ 'True
 --     , InVariant next IstatdDatum ~ 'True
@@ -227,7 +251,7 @@ mkFilterDifference
 --     , IElem DifferenceCounter injest
      )
   => DifferenceState
-  -> FilterFuncT (ci (Variant next)) (ci (Variant (DifferenceCounter ': next))) m
+  -> FilterFuncT (ci (Variant next)) (ci next') m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
 --  let action dc = writeChan out =<< (((fromJust . gconstr) <$> computeDifferenceCounter dstate dc) :: injest)
@@ -242,35 +266,42 @@ mkFilterDifference dstate = \out -> do
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterPrefix
-  :: ( MonadIO m
+  :: forall m ci co a next next'
+   . ( MonadIO m
      , HasKey a
-     , ChanLike ci co (Variant (a ': next))
+     , ChanLike ci co (Variant next)
+     , ChanLike ci co next'
+     , next' ~ (MinVariant (a ': next))
      )
   => BSLB.Builder
-  -> FilterFuncT (ci (Variant (a ': next))) (ci (Variant (a ': next))) m
+  -> FilterFuncT (ci (Variant next)) (ci next') m
 mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
   let action (Left r@(getKey -> k)) =
         let nk = prefix <> k
-        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant (a ': next))) $ updateKey r nk
+        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) $ updateKey r nk
       action (Right d) = writeChan out $ unsafeCoerce d
   go_ $ forever $ (action . splitVariant) =<< readChan outC
   return inC
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterSuffix
-  :: ( MonadIO m
+  :: forall m ci co a next next'
+   . ( MonadIO m
      , HasKey a
-     , ChanLike ci co a
+     , ChanLike ci co next'
+     , ChanLike ci co (Variant next)
+     , next' ~ (MinVariant (a ': next))
      )
   => BSLB.Builder
-  -> FilterFuncT (ci a) (ci a) m
+  -> FilterFuncT (ci (Variant next)) (ci next') m
 mkFilterSuffix suffix = \out -> do
   (inC, outC) <- newZChan
-  let action r@(getKey -> k) =
+  let action (Left (r@(getKey -> k))) =
         let nk = k <> suffix
-        in writeChan out $ updateKey r nk
-  go_ $ forever $ action =<< readChan outC
+        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) $ updateKey r nk
+      action (Right d) = writeChan out $ unsafeCoerce d
+  go_ $ forever $ (action . splitVariant) =<< readChan outC
   return inC
 
 -- | Creates a sized buffer for messages going through this pipeline
@@ -290,22 +321,25 @@ mkBuffer size = \out -> do
 -- | Creates a sized buffer for messages going through this pipeline ala `mkBuffer`. Additionally
 -- records its own length every 1 second to the pipeline.
 mkMonitoredBuffer
-  :: ( MonadCatch m
+  :: forall m ci co next next'
+   . ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co (Variant (IstatdDatum ': next))
+     , ChanLike ci co next'
+     , ChanLike ci co (Variant next)
      , SupportsTime m
      , MonadBaseControl IO m
+     , next' ~ (MinVariant (IstatdDatum ': next))
      )
   => BSLB.Builder
   -> Int
-  -> FilterFuncT (ci (Variant (IstatdDatum ': next))) (ci (Variant (IstatdDatum ': next))) m
+  -> FilterFuncT (ci (Variant next)) (ci next') m
 mkMonitoredBuffer name size = \out -> do
   (inC, outC) <- newBChan size
   let action = go_ $ forever $ writeChan out =<< (readChan outC)
   ticker <- tick 1
   let recordAction =
         let channelAction =
-              let datum len t = mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ':next))) $ IstatdDatum Gauge name t (fromIntegral len)
+              let datum len t = mkVariantV (Proxy :: Proxy next') $ IstatdDatum Gauge name t (fromIntegral len)
                   writeAction len = writeChan out . datum len =<< getPOSIXTime
               in (liftIO $ U.readChan ticker) >> (writeAction =<< inChanLen inC)
         in goM_ $ forever $ channelAction
@@ -338,26 +372,26 @@ mkSlowdownBuffer time size = \out -> do
 mkPercentileFilter
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co (Variant (IstatdDatum ': next))
+     , ChanLike ci co next
      , SupportsTime m
      , MonadBaseControl IO m
      )
   => Int
   -> [Percentile]
-  -> FilterFuncT (ci (Variant (IstatdDatum ': next))) (ci (Variant (IstatdDatum ': next))) m
+  -> FilterFuncT (ci next) (ci next) m
 mkPercentileFilter seconds percentiles = \out -> do
   (inC, outC) <- newZChan
   pstate <- mkPercentileState
   let collectPercentile (Left d@(IstatdDatum Gauge k _ v)) = do
         addPercentile pstate (BSLB.toLazyByteString k) v
-        return $ mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ': next))) $ updateKey d (k <> BSLB.lazyByteString ".raw")
-      collectPercentile (Left d) = return $ mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ': next))) d
+        return $ mkVariantV (Proxy :: Proxy next) $ updateKey d (k <> BSLB.lazyByteString ".raw")
+      collectPercentile (Left d) = return $ mkVariantV (Proxy :: Proxy next) d
       collectPercentile (Right d) = return $ unsafeCoerce d
       action = go_ $ forever $ writeChan out =<< (collectPercentile . splitVariant) =<< (readChan outC)
   ticker <- tick seconds
   let recordAction =
         let channelAction =
-              let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ \d -> writeChan out $ mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ': next))) $ d
+              let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ \d -> writeChan out $ mkVariantV (Proxy :: Proxy next) d
               in (liftIO $ U.readChan ticker) >> writeAction >> clearPercentiles pstate
         in goM_ $ forever $ channelAction
   action `catch` \(_ :: ChannelException) -> putStrLnIO "PercentileBuffer died" >> return ()
@@ -368,9 +402,9 @@ mkPercentileFilter seconds percentiles = \out -> do
 mkNullRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co (Variant '[IstatdDatum])
+     , ChanLike ci co (MinVariant '[IstatdDatum])
      )
-  => m (ci (Variant '[IstatdDatum]))
+  => m (ci (MinVariant '[IstatdDatum]))
 mkNullRecorder = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ void $ readChan outC
@@ -381,10 +415,10 @@ mkNullRecorder = do
 mkPipeRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co (Variant '[IstatdDatum])
+     , ChanLike ci co (MinVariant '[IstatdDatum])
      )
-  => ci (Variant '[IstatdDatum])
-  -> m (ci (Variant '[IstatdDatum]))
+  => ci (MinVariant '[IstatdDatum])
+  -> m (ci (MinVariant '[IstatdDatum]))
 mkPipeRecorder c = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ writeChan c =<< (readChan outC)
@@ -395,9 +429,9 @@ mkPipeRecorder c = do
 mkPrintingRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co (Variant '[IstatdDatum])
+     , ChanLike ci co (MinVariant '[IstatdDatum])
      )
-  => m (ci (Variant '[IstatdDatum]))
+  => m (ci (MinVariant '[IstatdDatum]))
 mkPrintingRecorder = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ putStrLn . show =<< readChan outC
@@ -408,9 +442,9 @@ mkPrintingRecorder = do
 mkPrintingEncodedRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co (Variant '[IstatdDatum])
+     , ChanLike ci co (MinVariant '[IstatdDatum])
      )
-  => m (ci (Variant '[IstatdDatum]))
+  => m (ci (MinVariant '[IstatdDatum]))
 mkPrintingEncodedRecorder = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ putStrLn . show . toPacket . (\(Left d) -> d) . splitVariant =<< readChan outC
@@ -421,10 +455,10 @@ mkPrintingEncodedRecorder = do
 mkIstatdRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co (Variant '[IstatdDatum])
+     , ChanLike ci co (MinVariant '[IstatdDatum])
      )
   => IstatdConfig
-  -> m (ci (Variant '[IstatdDatum]))
+  -> m (ci (MinVariant '[IstatdDatum]))
 mkIstatdRecorder config = do
   (inC, outC) <- newZChan
   connection <- connect config

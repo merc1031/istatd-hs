@@ -66,7 +66,10 @@ module Istatd.TypeSet
 , Subset (..)
 , ISubset
 , In
-
+, Cmp
+, Sort
+, AsSet
+, MinVariant
 )
 where
 
@@ -78,6 +81,8 @@ import Data.Maybe
 import Prelude hiding (elem)
 import GHC.Prim (Any)
 import Unsafe.Coerce (unsafeCoerce)
+import Data.Type.Bool
+import Data.Type.Equality
 
 class Implicit p where
   implicitly :: p
@@ -110,6 +115,7 @@ instance Implicit (Subset '[] xs) where
 instance (IElem x ys, ISubset xs ys) => Implicit (Subset (x ': xs) ys) where
   implicitly = SubsetCons implicitly implicitly
 
+type MinVariant xs = Variant (AsSet xs)
 --import Data.Type.Equality
 --
 --
@@ -123,8 +129,9 @@ type role Variant representational
 --extendVariant (Variant m e) = Variant (m+1) e
 --
 mkVariant :: forall v n vs vss
-           . ( vss ~ (UniqueInsert vs v)
-             , n ~ (FirstIdxList vss v)
+           . ( --vss ~ (UniqueInsert vs v)
+               n ~ (FirstIdxList vss v)
+             , vss ~ (AsSet (v ': vs))
              , SNatRep n
              , IElem v vss
              , ISubset vs vss
@@ -522,3 +529,31 @@ isSubList :: ( IsSubList (rs) (srs) ~ 'True
          -> Proxy srs
          -> ()
 isSubList _ _ = ()
+
+{-| Remove duplicates from a sorted list -}
+type family Nub (t :: [k]) :: [k] where
+    Nub '[]           = '[]
+    Nub '[e]          = '[e]
+    Nub (e ': e ': s) = Nub (e ': s)
+    Nub (e ': f ': s) = e ': Nub (f ': s)
+
+type AsSet s = Nub (Sort s)
+
+{-| List append (essentially set disjoint union) -}
+type family (:++) (x :: [k]) (y :: [k]) :: [k] where
+            '[]       :++ xs = xs
+            (x ': xs) :++ ys = x ': (xs :++ ys)
+
+{-| Type-level quick sort for normalising the representation of sets -}
+type family Sort (xs :: [k]) :: [k] where
+            Sort '[]       = '[]
+            Sort (x ': xs) = ((Sort (Filter 'FMin x xs)) :++ '[x]) :++ (Sort (Filter 'FMax x xs))
+
+data Flag = FMin | FMax
+
+type family Filter (f :: Flag) (p :: k) (xs :: [k]) :: [k] where
+            Filter f p '[]       = '[]
+            Filter 'FMin p (x ': xs) = If (Cmp x p == 'LT) (x ': (Filter 'FMin p xs)) (Filter 'FMin p xs)
+            Filter 'FMax p (x ': xs) = If (Cmp x p == 'GT || Cmp x p == 'EQ) (x ': (Filter 'FMax p xs)) (Filter 'FMax p xs)
+
+type family Cmp (a :: k) (b :: k) :: Ordering
