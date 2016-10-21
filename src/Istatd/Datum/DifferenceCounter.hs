@@ -1,5 +1,9 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# OPTIONS_GHC -fno-warn-unused-matches #-}
 module Istatd.Datum.DifferenceCounter
 ( DifferenceCounter (..)
+, DifferenceCounterIsh (..)
 , DifferenceState (..)
 , mkDifferenceState
 , computeDifferenceCounter
@@ -19,6 +23,17 @@ import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.ByteString.Lazy.Char8          as BSLC
 import qualified  Data.HashMap.Strict                 as HM
 import qualified  Data.Time.Clock.POSIX               as POSIX
+
+import IfCxt
+
+
+
+class DifferenceCounterIsh a where
+  toDiff :: a -> DifferenceCounter
+
+instance DifferenceCounterIsh DifferenceCounter where
+  toDiff = id
+
 
 instance HasKey DifferenceCounter where
   getKey (DifferenceCounter k _ _) = BSLB.lazyByteString k
@@ -47,3 +62,5 @@ computeDifferenceCounter (DifferenceState stateV) (DifferenceCounter k t v) = do
     modifyTVar' stateV (\h -> HM.insert k v h)
     return diff
   return $ IstatdDatum Counter (BSLB.lazyByteString k) t v'
+
+mkIfCxtInstances ''DifferenceCounterIsh

@@ -1,6 +1,7 @@
 module Istatd.Types
 ( IstatdDatum (..)
 , IstatdType (..)
+, IstatdData (..)
 , HasKey (..)
 , FilterFunc
 , FilterFuncT
@@ -25,6 +26,12 @@ data IstatdType =
 
 data IstatdDatum =
   IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double
+
+class IstatdData a where
+  toData :: a -> IstatdDatum
+
+instance IstatdData IstatdDatum where
+  toData = id
 
 type FilterFunc c m = (c -> m c)
 type FilterFuncT ci co m = (ci -> m co)

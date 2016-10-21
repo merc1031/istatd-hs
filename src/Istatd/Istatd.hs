@@ -70,6 +70,7 @@ import            Istatd.Client                       ( IstatdConfig (..)
                                                       )
 import            Istatd.Control.Monad                ( (<<) )
 import            Istatd.Datum.DifferenceCounter      ( DifferenceCounter (..)
+                                                      , DifferenceCounterIsh (..)
                                                       , DifferenceState (..)
                                                       , mkDifferenceState
                                                       , computeDifferenceCounter
@@ -88,6 +89,7 @@ import            Istatd.Monad.Types                  ( runAppM
                                                       )
 import            Istatd.Class.Time                   ( SupportsTime (..) )
 import            Istatd.Types                        ( IstatdDatum(..)
+                                                      , IstatdData (..)
                                                       , IstatdType (..)
                                                       , HasKey (..)
                                                       , FilterFunc
@@ -207,16 +209,29 @@ mkFilterPipeline sink fs =
 -- | Difference filter. Allows the recording of monotonically increasing counters as
 -- the rate at which they change. Needs to come first in a pipeline, see `mkFilterPipelineWithSource`.
 mkFilterDifference
-  :: ( MonadIO m
+  :: forall m ci co a
+   . ( MonadIO m
      , ChanLike ci co IstatdDatum
-     , ChanLike ci' co' DifferenceCounter
+     , ChanLike ci co a
+     , IfCxt (DifferenceCounterIsh a)
+     , IfCxt (IstatdData a)
+     , MonadBaseControl IO m
      )
   => DifferenceState
-  -> FilterFuncT (ci IstatdDatum) (ci' DifferenceCounter) m
+  -> FilterFuncT (ci IstatdDatum) (ci a) m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
-  let action dc = writeChan out =<< computeDifferenceCounter dstate dc
-  go_ $ forever $ action =<< readChan outC
+  let --action dc = writeChan out =<< computeDifferenceCounter dstate dc
+      ifDiffCounter :: a -> m ()
+      ifDiffCounter v = writeChan out =<< (ifCxt (Proxy :: Proxy (DifferenceCounterIsh a))
+                                                (computeDifferenceCounter dstate . toDiff)
+                                                (\s -> return $ ifCxt (Proxy :: Proxy (IstatdData a))
+                                                                      toData
+                                                                      (error "Difference needs to resolve to istatddata")
+                                                                      s
+                                                ) v
+                                          )
+  goM_ $ forever $ ifDiffCounter =<< readChan outC
   return inC
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
@@ -361,13 +376,15 @@ mkNullRecorder = do
 mkPipeRecorder
   :: ( MonadCatch m
      , MonadIO m
+     , ChanLike ci co a
      , ChanLike ci co IstatdDatum
+     , IstatdData a
      )
   => ci IstatdDatum
-  -> m (ci IstatdDatum)
+  -> m (ci a)
 mkPipeRecorder c = do
   (inC, outC) <- newZChan
-  let action = go_ $ forever $ writeChan c =<< (readChan outC)
+  let action = go_ $ forever $ (writeChan c . toData) =<< (readChan outC)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
