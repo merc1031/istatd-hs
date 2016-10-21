@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE AllowAmbiguousTypes #-} --- For filter hAskey
 module Istatd.Istatd
 ( ChanLike (..)
@@ -99,6 +100,7 @@ import            Istatd.Types                        ( IstatdDatum(..)
 
 import            Unsafe.Coerce
 import            Istatd.TypeSet
+import            IfCxt
 
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
@@ -259,7 +261,7 @@ mkFilterDifference dstate = \out -> do
       action (Left dc) = do
         ida <- computeDifferenceCounter dstate dc
         writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) ida
-      action  (Right rs) = writeChan out rs
+      action  (Right rs) = writeChan out $ unsafeCoerce rs
 
   go_ $ forever $ (action . splitVariant ) =<< readChan outC
   return inC
@@ -268,40 +270,63 @@ mkFilterDifference dstate = \out -> do
 mkFilterPrefix
   :: forall m ci co a next next'
    . ( MonadIO m
-     , HasKey a
      , ChanLike ci co (Variant next)
      , ChanLike ci co next'
-     , next' ~ (MinVariant (a ': next))
+     , next' ~ (MinVariant (next))
      )
   => BSLB.Builder
   -> FilterFuncT (ci (Variant next)) (ci next') m
 mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
-  let action (Left r@(getKey -> k)) =
-        let nk = prefix <> k
-        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) $ updateKey r nk
-      action (Right d) = writeChan out $ unsafeCoerce d
-  go_ $ forever $ (action . splitVariant) =<< readChan outC
+--  let action (Left r@(getKey -> k)) =
+--        let nk = prefix <> k
+--        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) $ updateKey r nk
+--      action (Right d) = writeChan out $ unsafeCoerce d
+--  go_ $ forever $ (action . splitVariant) =<< readChan outC
+  let action v = writeChan out v
+  go_ $ forever $ (doIt action prefix ifHasKey (\p k -> p <> k)) =<< readChan outC
   return inC
+
+doIt :: (MonadIO m)
+     => (Variant hs' -> m ())
+     -> BSLB.Builder
+     -> (forall a. IfCxt (HasKey a) => (HasKey a => a -> a) -> (a -> a) -> a -> a)
+     -> (BSLB.Builder -> BSLB.Builder -> BSLB.Builder)
+     -> Variant hs
+     -> m ()
+doIt a prefix f c v =
+  let v' = splitVariant v
+  in a $ case v' of
+       Left v'' -> mkVariant (Proxy :: Proxy (Variant hs')) $ f (lefter) (id) v''
+       Right v'' -> unsafeCoerce $ id v''
+    where
+      lefter r@(getKey -> k) =
+        let nk = c prefix k
+        in updateKey r nk
+
+
+ifHasKey :: forall a. IfCxt (HasKey a) => (HasKey a => a -> a) -> (a -> a) -> a -> a
+ifHasKey l r = ifCxt (Proxy :: Proxy (HasKey a)) l r
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterSuffix
   :: forall m ci co a next next'
    . ( MonadIO m
-     , HasKey a
      , ChanLike ci co next'
      , ChanLike ci co (Variant next)
-     , next' ~ (MinVariant (a ': next))
+     , next' ~ (MinVariant (next))
      )
   => BSLB.Builder
   -> FilterFuncT (ci (Variant next)) (ci next') m
 mkFilterSuffix suffix = \out -> do
   (inC, outC) <- newZChan
-  let action (Left (r@(getKey -> k))) =
-        let nk = k <> suffix
-        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) $ updateKey r nk
-      action (Right d) = writeChan out $ unsafeCoerce d
-  go_ $ forever $ (action . splitVariant) =<< readChan outC
+--  let action (Left (r@(getKey -> k))) =
+--        let nk = k <> suffix
+--        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) $ updateKey r nk
+--      action (Right d) = writeChan out $ unsafeCoerce d
+--  go_ $ forever $ (action . splitVariant) =<< readChan outC
+  let action v = writeChan out v
+  go_ $ forever $ (doIt action suffix ifHasKey (\s k -> k <> s)) =<< readChan outC
   return inC
 
 -- | Creates a sized buffer for messages going through this pipeline
@@ -332,14 +357,14 @@ mkMonitoredBuffer
      )
   => BSLB.Builder
   -> Int
-  -> FilterFuncT (ci (Variant next)) (ci next') m
+  -> FilterFuncT (ci (MinVariant (IstatdDatum ': next))) (ci (Variant next)) m
 mkMonitoredBuffer name size = \out -> do
   (inC, outC) <- newBChan size
-  let action = go_ $ forever $ writeChan out =<< (readChan outC)
+  let action = go_ $ forever $ writeChan out =<< (return . unsafeCoerce) =<< (readChan outC)
   ticker <- tick 1
   let recordAction =
         let channelAction =
-              let datum len t = mkVariantV (Proxy :: Proxy next') $ IstatdDatum Gauge name t (fromIntegral len)
+              let datum len t = mkVariantV (Proxy :: Proxy (MinVariant (IstatdDatum ': next))) $ IstatdDatum Gauge name t (fromIntegral len)
                   writeAction len = writeChan out . datum len =<< getPOSIXTime
               in (liftIO $ U.readChan ticker) >> (writeAction =<< inChanLen inC)
         in goM_ $ forever $ channelAction
@@ -370,28 +395,34 @@ mkSlowdownBuffer time size = \out -> do
 -- The original gauge will have .raw appended to its name, and a number of other gauages
 -- will be reported using the format 'key.{percentile}th'
 mkPercentileFilter
-  :: ( MonadCatch m
+  :: forall m ci co next next'
+   . ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co next
+     , ChanLike ci co (Variant next)
+  --   , ChanLike ci co next'
+     , ChanLike ci co next'
+     , next' ~ (MinVariant (IstatdDatum ': next))
+     , Variant next ~ next'
+     , 'True ~ InList next IstatdDatum
      , SupportsTime m
      , MonadBaseControl IO m
      )
   => Int
   -> [Percentile]
-  -> FilterFuncT (ci next) (ci next) m
+  -> FilterFuncT (ci next') (ci next') m
 mkPercentileFilter seconds percentiles = \out -> do
   (inC, outC) <- newZChan
   pstate <- mkPercentileState
   let collectPercentile (Left d@(IstatdDatum Gauge k _ v)) = do
         addPercentile pstate (BSLB.toLazyByteString k) v
-        return $ mkVariantV (Proxy :: Proxy next) $ updateKey d (k <> BSLB.lazyByteString ".raw")
-      collectPercentile (Left d) = return $ mkVariantV (Proxy :: Proxy next) d
+        return $ mkVariantV (Proxy :: Proxy (next')) $ updateKey d (k <> BSLB.lazyByteString ".raw")
+      collectPercentile (Left d) = return $ mkVariantV (Proxy :: Proxy (next')) d
       collectPercentile (Right d) = return $ unsafeCoerce d
       action = go_ $ forever $ writeChan out =<< (collectPercentile . splitVariant) =<< (readChan outC)
   ticker <- tick seconds
   let recordAction =
         let channelAction =
-              let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ \d -> writeChan out $ mkVariantV (Proxy :: Proxy next) d
+              let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ \d -> writeChan out $ mkVariantV (Proxy :: Proxy (next')) d
               in (liftIO $ U.readChan ticker) >> writeAction >> clearPercentiles pstate
         in goM_ $ forever $ channelAction
   action `catch` \(_ :: ChannelException) -> putStrLnIO "PercentileBuffer died" >> return ()

@@ -145,7 +145,7 @@ mkVariant _ v = Variant (sNatToInt idx) (unsafeCoerce v)
     idx = getSNat
 
 mkVariantV :: forall v n vs vss
-            . ( vss ~ (UniqueInsert vs v)
+            . ( vss ~ (AsSet (v ': vs))--vss ~ (UniqueInsert vs v)
               , n ~ (FirstIdxList vss v)
               , SNatRep n
               )

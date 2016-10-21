@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
 module Istatd.Types
 ( IstatdDatum (..)
 , IstatdType (..)
@@ -17,11 +19,14 @@ import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.Double.Conversion.ByteString   as PrintDouble
 import qualified  Data.Time.Clock.POSIX               as POSIX
 
+import Istatd.TypeSet (Cmp)
+
 data IstatdType =
     Counter
   | Gauge
   deriving (Show, Eq)
 
+type instance Cmp IstatdDatum IstatdDatum = 'EQ
 
 data IstatdDatum =
   IstatdDatum !IstatdType !BSLB.Builder !POSIX.POSIXTime !Double

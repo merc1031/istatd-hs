@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
 module Istatd.Datum.DifferenceCounter
 ( DifferenceCounter (..)
 , DifferenceState (..)
@@ -14,6 +16,7 @@ import            Istatd.Types                        ( IstatdDatum (..)
                                                       , IstatdType (..)
                                                       , HasKey (..)
                                                       )
+import Istatd.TypeSet (Cmp)
 
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 import qualified  Data.ByteString.Lazy.Char8          as BSLC
@@ -26,6 +29,10 @@ newtype DifferenceState = DifferenceState (TVar (HM.HashMap BSLC.ByteString Doub
 instance HasKey DifferenceCounter where
   getKey (DifferenceCounter k _ _) = BSLB.lazyByteString k
   updateKey (DifferenceCounter _k t v) k = DifferenceCounter (BSLB.toLazyByteString k) t v
+
+type instance Cmp DifferenceCounter IstatdDatum = 'GT
+type instance Cmp IstatdDatum DifferenceCounter = 'LT
+type instance Cmp DifferenceCounter DifferenceCounter = 'EQ
 
 mkDifferenceState
   :: MonadIO m
