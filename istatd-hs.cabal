@@ -39,6 +39,7 @@ library
                      , deepseq
                      , double-conversion
                      , exceptions
+                     , ifcxt
                      , lifted-async
                      , monad-control
                      , mtl

@@ -1,10 +1,9 @@
 module Istatd.Types
 ( IstatdDatum (..)
 , IstatdType (..)
+, HasKey (..)
 , FilterFunc
 , FilterFuncT
-, getKey
-, updateKey
 , toPacket
 )
 where
@@ -29,6 +28,18 @@ data IstatdDatum =
 
 type FilterFunc c m = (c -> m c)
 type FilterFuncT ci co m = (ci -> m co)
+
+class HasKey a where
+  getKey :: a -> BSLB.Builder
+  updateKey :: a -> BSLB.Builder -> a
+
+
+instance HasKey IstatdDatum where
+  getKey (IstatdDatum _ k _ _) = k
+
+  updateKey (IstatdDatum c _k t i) k =
+    IstatdDatum c k t i
+
 
 instance Show IstatdDatum where
   show (IstatdDatum it k t d) =
@@ -73,13 +84,3 @@ encode (IstatdDatum ptype name _t value) =
         Counter -> BSLB.char7 '*'
         Gauge -> mempty
 {-# INLINE encode #-}
-
-getKey :: IstatdDatum
-       -> BSLB.Builder
-getKey (IstatdDatum _ k _ _) = k
-
-updateKey :: BSLB.Builder
-          -> IstatdDatum
-          -> IstatdDatum
-updateKey k (IstatdDatum c _k t i) =
-  IstatdDatum c k t i

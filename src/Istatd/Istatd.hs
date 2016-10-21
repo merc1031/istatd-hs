@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -13,6 +14,8 @@ module Istatd.Istatd
 , SupportsTime (..)
 , (.<:.)
 , (.:>.)
+, appendF
+, prependF
 , mkFilterPipeline
 , mkFilterPipelineWithSource
 , mkBuffer
@@ -33,6 +36,8 @@ module Istatd.Istatd
 , State (..)
 , runAppM
 , runAppM'
+, mkPipelineWithSink
+, mkPipelineWithSinkM
 )
 where
 
@@ -79,36 +84,95 @@ import            Istatd.Monad.Types                  ( runAppM
 import            Istatd.Class.Time                   ( SupportsTime (..) )
 import            Istatd.Types                        ( IstatdDatum(..)
                                                       , IstatdType (..)
+                                                      , HasKey (..)
                                                       , FilterFunc
                                                       , FilterFuncT
-                                                      , updateKey
-                                                      , getKey
                                                       , toPacket
                                                       )
 
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
 
-infixr 1 .:>.
-infixr 1 .<:.
+infixl 1 .:>., `appendF`
+infixr 1 .<:., `prependF`
 
--- | Type Specific `>=>`
-(.:>.)
-  :: (Monad m)
-  => FilterFuncT (ci di) (ci dii) m
-  -> FilterFuncT (ci dii) (ci diii) m
-  -> ci di
-  -> m ( ci diii )
-fl .:>. fr = fl >=> fr
+mkPipelineWithSinkM
+  :: ( MonadIO m
+     )
+  => m (ci IstatdDatum)
+  -> FilterFuncT (ci IstatdDatum) (ci a) m
+  -> m (ci a)
+mkPipelineWithSinkM sinkA pipe = do
+  sink <- sinkA
+  mkPipelineWithSink sink pipe
 
--- | Type Specific `<=<`
+mkPipelineWithSink
+  :: ( MonadIO m
+     )
+  => ci IstatdDatum
+  -> FilterFuncT (ci IstatdDatum) (ci a) m
+  -> m (ci a)
+mkPipelineWithSink sink pipe = do
+  inC <- pipe sink
+  return inC
+
+
+-- | Prepend a filter in the pipeline.
+-- Synonym for `.<:.`, analagous to `<=<`
+prependF
+  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
+   . ( Monad m
+     )
+  => FilterFuncT (ci next) (ci inter) m
+  -- ^ Rest of the pipeline
+  -> FilterFuncT (ci inter) (ci injest) m
+  -- ^ Sink end to add to the pipeline chain
+  -> FilterFuncT (ci next) (ci injest) m
+  -- ^ New sink end of the current pipeline chain
+prependF = (.<:.)
+
+-- | Append a filter in the pipeline.
+-- Synonym for `.:>.`, analagous to `>=>`
+appendF
+  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
+   . ( Monad m
+     )
+  => FilterFuncT (ci inter) (ci injest) m
+  -- ^ Rest of the pipeline
+  -> FilterFuncT (ci next) (ci inter) m
+  -- ^ Sink end to add to the pipeline chain
+  -> FilterFuncT (ci next) (ci injest) m
+  -- ^ New sink end of the current pipeline chain
+appendF = (.:>.)
+
+--- | Prepend a filter in the pipeline.
+--- Synonym for `.<:.`, analagous to `<=<`
 (.<:.)
-  :: (Monad m)
-  => FilterFuncT (ci dii) (ci diii) m
-  -> FilterFuncT (ci di) (ci dii) m
-  -> ci di
-  -> m ( ci diii )
-fl .<:. fr = fl <=< fr
+  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
+   . ( Monad m
+     )
+  => FilterFuncT (ci next) (ci inter) m
+  -- ^ Rest of the pipeline
+  -> FilterFuncT (ci inter) (ci injest) m
+  -- ^ Sink end to add to the pipeline chain
+  -> FilterFuncT (ci next) (ci injest) m
+  -- ^ New sink end of the current pipeline chain
+fl .<:. fr = fl >=> fr
+
+
+-- | Append a filter in the pipeline.
+-- Synonym for `.:>.`, analagous to `>=>`
+(.:>.)
+  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
+   . ( Monad m
+     )
+  => FilterFuncT (ci inter) (ci injest) m
+  -- ^ Rest of the pipeline
+  -> FilterFuncT (ci next) (ci inter) m
+  -- ^ Sink end to add to the pipeline chain
+  -> FilterFuncT (ci next) (ci injest) m
+  -- ^ New sink end of the current pipeline chain
+fl .:>. fr = fl <=< fr
 
 
 -- | Composes a sink, a specific (possibly differently typed) source, and many
@@ -157,7 +221,7 @@ mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
   let action r@(getKey -> k) =
         let nk = prefix <> k
-        in writeChan out $ updateKey nk r
+        in writeChan out $ updateKey r nk
   go_ $ forever $ action =<< readChan outC
   return inC
 
@@ -172,7 +236,7 @@ mkFilterSuffix suffix = \out -> do
   (inC, outC) <- newZChan
   let action r@(getKey -> k) =
         let nk = k <> suffix
-        in writeChan out $ updateKey nk r
+        in writeChan out $ updateKey r nk
   go_ $ forever $ action =<< readChan outC
   return inC
 
@@ -253,7 +317,7 @@ mkPercentileFilter seconds percentiles = \out -> do
   pstate <- mkPercentileState
   let collectPercentile d@(IstatdDatum Gauge k _ v) = do
         addPercentile pstate (BSLB.toLazyByteString k) v
-        return $ updateKey (k <> BSLB.lazyByteString ".raw") d
+        return $ updateKey d (k <> BSLB.lazyByteString ".raw")
       collectPercentile d = return d
       action = go_ $ forever $ writeChan out =<< collectPercentile =<< (readChan outC)
   ticker <- tick seconds
