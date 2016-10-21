@@ -1,8 +1,13 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -fno-warn-unused-matches #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Istatd.Istatd
 ( ChanLike (..)
 , IstatdDatum (..)
@@ -89,9 +94,13 @@ import            Istatd.Types                        ( IstatdDatum(..)
                                                       , FilterFuncT
                                                       , toPacket
                                                       )
+import            IfCxt
+import            Data.Proxy
 
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
+
+mkIfCxtInstances ''HasKey
 
 infixl 1 .:>., `appendF`
 infixr 1 .<:., `prependF`
@@ -212,17 +221,22 @@ mkFilterDifference dstate = \out -> do
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterPrefix
-  :: ( MonadIO m
-     , ChanLike ci co IstatdDatum
+  :: forall m ci co a
+   . ( MonadIO m
+     , ChanLike ci co a
+     , MonadBaseControl IO m
+     , IfCxt (HasKey a)
      )
   => BSLB.Builder
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFunc (ci a) m
 mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
-  let action r@(getKey -> k) =
+  let uk r@(getKey -> k) =
         let nk = prefix <> k
-        in writeChan out $ updateKey r nk
-  go_ $ forever $ action =<< readChan outC
+        in updateKey r nk
+      ifHasKey :: a -> m ()
+      ifHasKey v = writeChan out $ ifCxt (Proxy :: Proxy (HasKey a)) uk (id) v
+  goM_ $ forever $ ifHasKey =<< readChan outC
   return inC
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
