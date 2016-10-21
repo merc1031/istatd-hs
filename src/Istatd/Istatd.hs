@@ -4,6 +4,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
 module Istatd.Istatd
 ( ChanLike (..)
@@ -38,10 +39,12 @@ module Istatd.Istatd
 , State (..)
 , runAppM
 , runAppM'
+, mkPipelineWithSink
+, mkPipelineWithSinkM
 )
 where
 
-import Data.Maybe
+--import Data.Maybe
 
 import            Control.Concurrent.Async.Lifted     ( async )
 import            Control.Exception.Safe              ( catch )
@@ -58,6 +61,7 @@ import            Control.Monad.IO.Class              ( MonadIO
                                                       )
 import            Control.Monad.Trans.Control         ( MonadBaseControl )
 import            Data.Monoid                         ( (<>) )
+import            Data.Proxy
 import            Istatd.Chan.ChanLike                ( ChanLike (..)
                                                       , ChannelException (..)
                                                       )
@@ -92,6 +96,7 @@ import            Istatd.Types                        ( IstatdDatum(..)
                                                       , toPacket
                                                       )
 
+import            Unsafe.Coerce
 import            Istatd.TypeSet
 
 import qualified  Control.Concurrent.Chan.Unagi       as U
@@ -99,6 +104,27 @@ import qualified  Data.ByteString.Lazy.Builder        as BSLB
 
 infixl 1 .:>., `appendF`
 infixr 1 .<:., `prependF`
+
+mkPipelineWithSinkM
+  :: ( MonadIO m
+     )
+  => m (ci (Variant '[IstatdDatum]))
+  -> FilterFuncT (ci (Variant '[IstatdDatum])) (ci a) m
+  -> m (ci a)
+mkPipelineWithSinkM sinkA pipe = do
+  sink <- sinkA
+  mkPipelineWithSink sink pipe
+
+mkPipelineWithSink
+  :: ( MonadIO m
+     )
+  => ci (Variant '[IstatdDatum])
+  -> FilterFuncT (ci (Variant '[IstatdDatum])) (ci a) m
+  -> m (ci a)
+mkPipelineWithSink sink pipe = do
+  inC <- pipe sink
+  return inC
+
 
 -- | Prepend a filter in the pipeline.
 -- Synonym for `.<:.`, analagous to `<=<`
@@ -176,41 +202,59 @@ mkFilterPipeline sink fs =
 -- | Difference filter. Allows the recording of monotonically increasing counters as
 -- the rate at which they change. Needs to come first in a pipeline, see `mkFilterPipelineWithSource`.
 mkFilterDifference
-  :: ( MonadIO m
-     , ChanLike ci co next
-     , ChanLike ci' co' injest
-     , setnext ~ SetFromCompound next
-     , InSet setnext IstatdDatum ~ 'True
-     , injest ~ SetToCompound (SetInsert setnext DifferenceCounter)
+  :: forall m ci co next
+   . ( MonadIO m
+     , ChanLike ci co (Variant next)
+     , ChanLike ci co (Variant (DifferenceCounter ': next))
+----     , setnext ~ SetFromVariant next
+--     , InVariant injest IstatdDatum ~ 'True
+--     , InVariant next IstatdDatum ~ 'True
+--     , InVariant injest DifferenceCounter ~ 'True
+----     , injest ~ SetToVariant (SetInsert setnext DifferenceCounter)
+--     , 'True ~ VariantCompatibility injest next
+--     , me ~ VariantDiff injest next
+--     , next ~ VariantDiff injest me
+     --, Variant nexts ~ next
+     --, Variant injests ~ injest
+--     , next ~ (UniqueInsert next IstatdDatum)
+     , In next IstatdDatum next
+--     , injest ~ (UniqueInsert next DifferenceCounter)
+--     , In next DifferenceCounter injest
+     , SNatRep (FirstIdxList next IstatdDatum)
+--     , IElem IstatdDatum next
+--     , IElem IstatdDatum injest
+--     , ISubset next injest
+--     , IElem DifferenceCounter injest
      )
   => DifferenceState
-  -> FilterFuncT (ci next) (ci' injest) m
+  -> FilterFuncT (ci (Variant next)) (ci (Variant (DifferenceCounter ': next))) m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
 --  let action dc = writeChan out =<< (((fromJust . gconstr) <$> computeDifferenceCounter dstate dc) :: injest)
-  let action dc = do
-    ida <- computeDifferenceCounter dstate dc
-    let nv = gconstr ida :: Maybe next
-        nv' = fromJust nv
-    writeChan out nv
+  let action :: Either DifferenceCounter (Variant next) -> IO ()
+      action (Left dc) = do
+        ida <- computeDifferenceCounter dstate dc
+        writeChan out $ mkVariantV (Proxy :: Proxy (Variant next)) ida
+      action  (Right rs) = writeChan out rs
 
-  go_ $ forever $ action =<< readChan outC
+  go_ $ forever $ (action . splitVariant ) =<< readChan outC
   return inC
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterPrefix
   :: ( MonadIO m
      , HasKey a
-     , ChanLike ci co a
+     , ChanLike ci co (Variant (a ': next))
      )
   => BSLB.Builder
-  -> FilterFuncT (ci a) (ci a) m
+  -> FilterFuncT (ci (Variant (a ': next))) (ci (Variant (a ': next))) m
 mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
-  let action r@(getKey -> k) =
+  let action (Left r@(getKey -> k)) =
         let nk = prefix <> k
-        in writeChan out $ updateKey r nk
-  go_ $ forever $ action =<< readChan outC
+        in writeChan out $ mkVariantV (Proxy :: Proxy (Variant (a ': next))) $ updateKey r nk
+      action (Right d) = writeChan out $ unsafeCoerce d
+  go_ $ forever $ (action . splitVariant) =<< readChan outC
   return inC
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
@@ -248,20 +292,20 @@ mkBuffer size = \out -> do
 mkMonitoredBuffer
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co (Variant (IstatdDatum ': next))
      , SupportsTime m
      , MonadBaseControl IO m
      )
   => BSLB.Builder
   -> Int
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFuncT (ci (Variant (IstatdDatum ': next))) (ci (Variant (IstatdDatum ': next))) m
 mkMonitoredBuffer name size = \out -> do
   (inC, outC) <- newBChan size
   let action = go_ $ forever $ writeChan out =<< (readChan outC)
   ticker <- tick 1
   let recordAction =
         let channelAction =
-              let datum len t = IstatdDatum Gauge name t (fromIntegral len)
+              let datum len t = mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ':next))) $ IstatdDatum Gauge name t (fromIntegral len)
                   writeAction len = writeChan out . datum len =<< getPOSIXTime
               in (liftIO $ U.readChan ticker) >> (writeAction =<< inChanLen inC)
         in goM_ $ forever $ channelAction
@@ -294,25 +338,26 @@ mkSlowdownBuffer time size = \out -> do
 mkPercentileFilter
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co (Variant (IstatdDatum ': next))
      , SupportsTime m
      , MonadBaseControl IO m
      )
   => Int
   -> [Percentile]
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFuncT (ci (Variant (IstatdDatum ': next))) (ci (Variant (IstatdDatum ': next))) m
 mkPercentileFilter seconds percentiles = \out -> do
   (inC, outC) <- newZChan
   pstate <- mkPercentileState
-  let collectPercentile d@(IstatdDatum Gauge k _ v) = do
+  let collectPercentile (Left d@(IstatdDatum Gauge k _ v)) = do
         addPercentile pstate (BSLB.toLazyByteString k) v
-        return $ updateKey d (k <> BSLB.lazyByteString ".raw")
-      collectPercentile d = return d
-      action = go_ $ forever $ writeChan out =<< collectPercentile =<< (readChan outC)
+        return $ mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ': next))) $ updateKey d (k <> BSLB.lazyByteString ".raw")
+      collectPercentile (Left d) = return $ mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ': next))) d
+      collectPercentile (Right d) = return $ unsafeCoerce d
+      action = go_ $ forever $ writeChan out =<< (collectPercentile . splitVariant) =<< (readChan outC)
   ticker <- tick seconds
   let recordAction =
         let channelAction =
-              let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ writeChan out
+              let writeAction = computePercentiles pstate percentiles >>= \datums -> forM_ datums $ \d -> writeChan out $ mkVariantV (Proxy :: Proxy (Variant (IstatdDatum ': next))) $ d
               in (liftIO $ U.readChan ticker) >> writeAction >> clearPercentiles pstate
         in goM_ $ forever $ channelAction
   action `catch` \(_ :: ChannelException) -> putStrLnIO "PercentileBuffer died" >> return ()
@@ -323,9 +368,9 @@ mkPercentileFilter seconds percentiles = \out -> do
 mkNullRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co (Variant '[IstatdDatum])
      )
-  => m (ci IstatdDatum)
+  => m (ci (Variant '[IstatdDatum]))
 mkNullRecorder = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ void $ readChan outC
@@ -336,10 +381,10 @@ mkNullRecorder = do
 mkPipeRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co (Variant '[IstatdDatum])
      )
-  => ci IstatdDatum
-  -> m (ci IstatdDatum)
+  => ci (Variant '[IstatdDatum])
+  -> m (ci (Variant '[IstatdDatum]))
 mkPipeRecorder c = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ writeChan c =<< (readChan outC)
@@ -350,9 +395,9 @@ mkPipeRecorder c = do
 mkPrintingRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co (Variant '[IstatdDatum])
      )
-  => m (ci IstatdDatum)
+  => m (ci (Variant '[IstatdDatum]))
 mkPrintingRecorder = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ putStrLn . show =<< readChan outC
@@ -363,12 +408,12 @@ mkPrintingRecorder = do
 mkPrintingEncodedRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co (Variant '[IstatdDatum])
      )
-  => m (ci IstatdDatum)
+  => m (ci (Variant '[IstatdDatum]))
 mkPrintingEncodedRecorder = do
   (inC, outC) <- newZChan
-  let action = go_ $ forever $ putStrLn . show . toPacket =<< readChan outC
+  let action = go_ $ forever $ putStrLn . show . toPacket . (\(Left d) -> d) . splitVariant =<< readChan outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
@@ -376,15 +421,16 @@ mkPrintingEncodedRecorder = do
 mkIstatdRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co (Variant '[IstatdDatum])
      )
   => IstatdConfig
-  -> m (ci IstatdDatum)
+  -> m (ci (Variant '[IstatdDatum]))
 mkIstatdRecorder config = do
   (inC, outC) <- newZChan
   connection <- connect config
-  let send' p = send connection [p]
-  let action = go_ $ forever $ send' =<< readChan outC
+  let send' (Left p) = send connection [p]
+      send' (Right _) = return () -- absurd?
+  let action = go_ $ forever $ (send' . splitVariant) =<< readChan outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 

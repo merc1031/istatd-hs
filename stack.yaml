@@ -37,18 +37,27 @@ resolver: lts-7.3
 # will not be run. This is useful for tweaking upstream packages.
 packages:
 - '.'
+#- location:
+#    git: git@github.com:merc1031/HList.git
+#    commit: 66643fb75771e71192ab380e4f2ed56e37650f07
+#  extra-dep: true
+
 # Dependency packages to be pulled from upstream that are not in the resolver
 # (e.g., acme-missiles-0.3)
 extra-deps:
 - unagi-chan-0.4.0.0
 - containers-0.5.8.1
 - compound-types-0.1.3.1
+  #- HList-0.4.2.0
 
 # Override default flag values for local packages and extra-deps
 flags: {}
 
 # Extra package databases containing global packages
 extra-package-dbs: []
+
+ghc-options:
+#  HList: -fno-warn-redundant-constraints
 
 # Control whether we use the GHC we find on the path
 # system-ghc: true

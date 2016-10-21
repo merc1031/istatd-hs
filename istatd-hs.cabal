@@ -41,6 +41,8 @@ library
                      , deepseq
                      , double-conversion
                      , exceptions
+--                     , HList
+                     , ghc-prim
                      , hvect
                      , lifted-async
                      , monad-control
