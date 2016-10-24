@@ -23,6 +23,7 @@ library
                      , Istatd.Class.Time
                      , Istatd.Client
                      , Istatd.Complexity
+                     , Istatd.Simplicity
                      , Istatd.Control.Monad
                      , Istatd.Datum.DifferenceCounter
                      , Istatd.Datum.Percentile

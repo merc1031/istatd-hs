@@ -6,6 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 module Istatd.Chan.Chan where
 
+import            Data.Maybe
 import            Control.Arrow                           ( (***) )
 import            Control.DeepSeq                         ( NFData (..) )
 import            Control.Exception                       ( BlockedIndefinitelyOnMVar )
@@ -24,12 +25,13 @@ import            Data.IORef                              ( IORef
 import            Istatd.Chan.ChanLike                    ( ChanLike (..)
                                                           , ChannelException (..)
                                                           )
+import            Istatd.Simplicity
 
 import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU
 
 
-instance ChanLike InChanI OutChanI (a :: [* -> *])  where
+instance ChanLike InChanI OutChanI (a :: [*])  where
   newZChan   = iNewZChan
   newBChan   = iNewBChan
   writeChan  = iWriteChan
@@ -54,23 +56,27 @@ instance NFData (OutChanI a) where
   rnf (BOutChan !_ref !_chan) = ()
 
 iWriteChan
-  :: MonadIO m
-  => InChanI a
+  :: ( MonadIO m
+     , a :<: as
+     )
+  => InChanI (Summed as)
   -> a
   -> m ()
 iWriteChan (ZInChan uchan) r =
-  liftIO $ handleBlocked $ U.writeChan uchan r
+  liftIO $ handleBlocked $ U.writeChan uchan $ inj $ r
 iWriteChan (BInChan c buchan) r =
-  liftIO $ handleBlocked $ BU.writeChan buchan r >> (modLen c (+))
+  liftIO $ handleBlocked $ BU.writeChan buchan (inj $ r) >> (modLen c (+))
 
 iReadChan
-  :: (MonadIO m)
-  => OutChanI a
+  :: ( MonadIO m
+     , a :<: as
+     )
+  => OutChanI (Summed as)
   -> m a
 iReadChan (ZOutChan uchan) =
-  liftIO $ handleBlocked $ U.readChan uchan
+  (fromJust . outj) <$> (liftIO $ handleBlocked $ U.readChan uchan)
 iReadChan (BOutChan c buchan) =
-  liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r
+  (fromJust . outj) <$> (liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r)
 
 iOutChanLen
   :: (MonadIO m)
