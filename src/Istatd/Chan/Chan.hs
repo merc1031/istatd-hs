@@ -1,5 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Istatd.Chan.Chan where
@@ -27,7 +29,7 @@ import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU
 
 
-instance ChanLike InChanI OutChanI a where
+instance ChanLike InChanI OutChanI (a :: [* -> *])  where
   newZChan   = iNewZChan
   newBChan   = iNewBChan
   writeChan  = iWriteChan

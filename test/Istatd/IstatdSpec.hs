@@ -289,22 +289,22 @@ spec = do
         return (res, res')
       res `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 0)
       forM_ res' $ \r -> r `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 1)
---    it "difference counters can come second?" $ do
---      (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
---        dstate <- mkDifferenceState
---        (tchan, pipeline) <- mkPipeEnvG $ mkFilterSuffix "c"
---                                     .:>. mkFilterPrefix "a"
---                                     .:>. mkFilterDifference dstate
---                                     .:>. mkBuffer 1000
---
---        forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
---        forM_ [1..10] $ \v -> writeChan pipeline $ IstatdDatum Counter "CounterName2" 0 v
---        res <- readChan tchan
---        res' <- replicateM 9999 $ readChan tchan
---        ensureNoLeftovers tchan
---        return (res, res')
---      res `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 0)
---      forM_ res' $ \r -> r `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 1)
+    it "difference counters can come second?" $ do
+      (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
+        dstate <- mkDifferenceState
+        (tchan, pipeline) <- _t . mkPipeEnvG $ mkFilterSuffix "c"
+                                     .:>. mkFilterPrefix "a"
+                                     .:>. mkFilterDifference dstate
+                                     .:>. mkBuffer 1000
+
+        forM_ [1..10] $ \v -> writeChan pipeline $ IstatdDatum Counter "CounterName2" 0 v
+        forM_ [1..10000] $ \v -> writeChan pipeline $ DifferenceCounter "CounterName" 0 v
+        res <- readChan tchan
+        res' <- replicateM 9999 $ readChan tchan
+        ensureNoLeftovers tchan
+        return (res, res')
+      res `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 0)
+      forM_ res' $ \r -> r `shouldBe` (IstatdDatum Counter "aCounterNamec" 0 1)
     it "percentile counters report for gauges" $ do
       (timerIn, timer) <- U.newChan
       let state = newFakeState timer 0 defaultThreadDelay

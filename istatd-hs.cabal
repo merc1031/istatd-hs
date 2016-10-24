@@ -22,6 +22,7 @@ library
                      , Istatd.Chan.ChanT
                      , Istatd.Class.Time
                      , Istatd.Client
+                     , Istatd.Complexity
                      , Istatd.Control.Monad
                      , Istatd.Datum.DifferenceCounter
                      , Istatd.Datum.Percentile
@@ -44,6 +45,7 @@ library
                      , monad-control
                      , mtl
                      , network
+--                     , cluss
                      , safe-exceptions
                      , stm
                      , stm-chans

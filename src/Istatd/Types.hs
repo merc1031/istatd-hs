@@ -1,3 +1,4 @@
+{-# LANGUAGE NoMonomorphismRestriction #-}
 module Istatd.Types
 ( IstatdDatum (..)
 , IstatdType (..)
@@ -33,7 +34,7 @@ class IstatdData a where
 instance IstatdData IstatdDatum where
   toData = id
 
-type FilterFunc c m = (c -> m c)
+type FilterFunc c m = FilterFuncT c c m
 type FilterFuncT ci co m = (ci -> m co)
 
 class HasKey a where

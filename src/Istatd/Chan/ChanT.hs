@@ -1,9 +1,15 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE InstanceSigs #-}
 module Istatd.Chan.ChanT where
 
+import Data.Maybe
 import            Control.Arrow                           ( (***) )
 import            Control.Concurrent.STM                  ( TVar
                                                           , modifyTVar'
@@ -23,12 +29,17 @@ import            Control.Monad.IO.Class                  ( MonadIO
                                                           )
 import            Istatd.Chan.ChanLike                    ( ChanLike (..)
                                                           , ChannelException (..)
+                                                          , Sendable
+                                                          , unSendable
+                                                          , mkSendable
                                                           )
+--import Istatd.Types
+import Istatd.Complexity
 
 import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU
 
-instance ChanLike InChanI OutChanI a where
+instance ChanLike InChanI OutChanI (as :: [* -> *]) where
   newZChan   = iNewZChan
   newBChan   = iNewBChan
   writeChan  = iWriteChan
@@ -53,23 +64,27 @@ instance NFData (OutChanI a) where
   rnf (BOutChan !_ref !_chan) = ()
 
 iWriteChan
-  :: MonadIO m
-  => InChanI a
+  :: ( MonadIO m
+     , Sendable a :<: as
+     )
+  => InChanI (Summed as (Sendable a p))
   -> a
   -> m ()
 iWriteChan (ZInChan uchan) r =
-  liftIO $ handleBlocked $ U.writeChan uchan r
+  liftIO $ handleBlocked $ U.writeChan uchan $ inj $ mkSendable r
 iWriteChan (BInChan c buchan) r =
-  liftIO $ handleBlocked $ BU.writeChan buchan r >> modLen c (+)
+  liftIO $ handleBlocked $ BU.writeChan buchan (inj $ mkSendable r) >> modLen c (+)
 
 iReadChan
-  :: (MonadIO m)
-  => OutChanI a
+  :: ( MonadIO m
+     , Sendable a :<: as
+     )
+  => OutChanI (Summed as (Sendable a p))
   -> m a
 iReadChan (ZOutChan uchan) =
-  liftIO $ handleBlocked $ U.readChan uchan
+  (unSendable . fromJust . outj) <$> (liftIO $ handleBlocked $ U.readChan uchan)
 iReadChan (BOutChan c buchan) =
-  liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r
+  (unSendable . fromJust . outj) <$> (liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r)
 
 iOutChanLen
   :: (MonadIO m)

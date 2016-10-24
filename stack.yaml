@@ -48,6 +48,10 @@ extra-deps:
 - unagi-chan-0.4.0.0
 - containers-0.5.8.1
 - ifcxt-0.1.1
+#- cluss-0.3
+#- reorderable-0.3.1
+# compound-types
+# HList (from merc1031)
 
 # Override default flag values for local packages and extra-deps
 flags: {}

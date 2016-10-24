@@ -7,6 +7,7 @@
 :set -XTypeOperators
 :set -XPolyKinds
 :set -XKindSignatures
+:set -XTemplateHaskell
 :set +m
 :set -fprint-explicit-foralls
 :set -fprint-explicit-kinds

@@ -1,11 +1,15 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 module Istatd.Istatd
@@ -96,6 +100,7 @@ import            Istatd.Types                        ( IstatdDatum(..)
                                                       , FilterFuncT
                                                       , toPacket
                                                       )
+import Istatd.Complexity
 import            IfCxt
 import            Data.Proxy
 
@@ -170,6 +175,11 @@ appendF = (.:>.)
   -- ^ New sink end of the current pipeline chain
 fl .<:. fr = fl >=> fr
 
+--writeIt :: forall ci c a m (cs :: [* -> *])
+--         . ( Sendable a :<: cs
+--           )
+--        => ci cs -> a -> m ()
+--writeIt chan item = writeChan chan $ inj $ mkSendable item
 
 -- | Append a filter in the pipeline.
 -- Synonym for `.:>.`, analagous to `>=>`
@@ -243,10 +253,11 @@ mkFilterPrefix
      , IfCxt (HasKey a)
      )
   => BSLB.Builder
-  -> FilterFunc (ci a) m
+  -> FilterFuncT (ci a) (ci a) m
 mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
-  let uk r@(getKey -> k) =
+  let uk :: (HasKey a) => a -> a
+      uk r@(getKey -> k) =
         let nk = prefix <> k
         in updateKey r nk
       ifHasKey :: a -> m ()
@@ -256,17 +267,23 @@ mkFilterPrefix prefix = \out -> do
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterSuffix
-  :: ( MonadIO m
-     , ChanLike ci co IstatdDatum
+  :: forall m ci co a
+   . ( MonadIO m
+     , ChanLike ci co a
+     , MonadBaseControl IO m
+     , IfCxt (HasKey a)
      )
   => BSLB.Builder
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFuncT (ci a) (ci a) m
 mkFilterSuffix suffix = \out -> do
   (inC, outC) <- newZChan
-  let action r@(getKey -> k) =
+  let uk :: (HasKey a) => a -> a
+      uk r@(getKey -> k) =
         let nk = k <> suffix
-        in writeChan out $ updateKey r nk
-  go_ $ forever $ action =<< readChan outC
+        in updateKey r nk
+      ifHasKey :: a -> m ()
+      ifHasKey v = writeChan out $ ifCxt (Proxy :: Proxy (HasKey a)) uk (id) v
+  goM_ $ forever $ ifHasKey =<< readChan outC
   return inC
 
 -- | Creates a sized buffer for messages going through this pipeline
