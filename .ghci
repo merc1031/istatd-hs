@@ -1,13 +1,17 @@
 :set prompt "> "
-:set -XOverloadedStrings
 :set -XDataKinds
+:set -XExistentialQuantification
 :set -XExplicitForAll
+:set -XFlexibleContexts
+:set -XFlexibleInstances
 :set -XGADTs
+:set -XKindSignatures
+:set -XOverloadedStrings
+:set -XPolyKinds
+:set -XTemplateHaskell
+:set -XTypeApplications
 :set -XTypeFamilies
 :set -XTypeOperators
-:set -XPolyKinds
-:set -XKindSignatures
-:set -XTemplateHaskell
 :set +m
 :set -fprint-explicit-foralls
 :set -fprint-explicit-kinds
@@ -16,17 +20,19 @@
 :set -ddump-splices
 
 import Control.Monad (void, forever, (=<<), (>=>))
+import Control.Debounce (mkDebounce, defaultDebounceSettings, DebounceSettings (..))
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (async)
+import Control.Concurrent.STM
+import Control.Concurrent.STM.TBMChan
+import Control.Exception.Safe (catch)
+import Control.Exception (BlockedIndefinitelyOnMVar)
+import Control.Monad.IO.Class (liftIO , MonadIO)
 import Data.Foldable (foldrM)
 import Data.IORef
 import Data.Data
 import Data.Proxy
-import Control.Debounce (mkDebounce, defaultDebounceSettings, DebounceSettings (..))
-import Control.Concurrent (threadDelay)
-import Control.Concurrent.Async (async)
-import Control.Exception.Safe (catch)
-import Control.Exception (BlockedIndefinitelyOnMVar)
-import Control.Monad.IO.Class
-import Control.Concurrent.STM.TBMChan
+import Data.Void
 import qualified Control.Concurrent.Chan.Unagi as U
 import qualified Control.Concurrent.Chan.Unagi.Bounded as BU
 import qualified Data.Text.Lazy as TL
