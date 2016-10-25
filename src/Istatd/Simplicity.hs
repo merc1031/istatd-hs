@@ -64,6 +64,19 @@ instance ( Summable fs
          , Outjectable f fs
          ) => (f :<: fs)
 
+class Outjectable' (fs :: [*]) (os :: [*]) where
+  outj' :: Summed fs -> Maybe (Summed os)
+
+instance Outjectable' (f ': fs) (f ': os) where
+  outj' (Here fa) = Just (inj fa)
+  outj' (Elsewhere _) = Nothing
+
+instance {-# OVERLAPPABLE #-} (f :<: os, fs :<<: os, Outjectable' fs os) => Outjectable' (f ': fs) (g ': os) where
+  outj' (Here fa) = Just $ inj fa
+  outj' (Elsewhere fa) = case outj' fa of
+                           Just a -> Just $ inj a
+                           Nothing -> Nothing
+
 
 class ( Summable fs
       , Summable os
