@@ -7,6 +7,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Istatd.IstatdSpec where
@@ -32,6 +33,7 @@ import            Control.Monad.Trans.Control       ( MonadBaseControl (..)
                                                     )
 import            Data.Proxy
 import            Istatd.Istatd
+import            Istatd.Simplicity
 import            Test.Hspec
 
 import qualified  Control.Concurrent.Chan.Unagi     as U
@@ -43,7 +45,7 @@ mkPipeEnvG'
   :: ( MonadIO m
      , MonadCatch m
      )
-  => m ((ChanT.OutChanI IstatdDatum), ChanT.InChanI (IstatdDatum))
+  => m ((ChanT.OutChanI (Summed '[IstatdDatum])), ChanT.InChanI (Summed '[IstatdDatum]))
 mkPipeEnvG' = do
   (inC, outC) <- newZChan
   sink <- mkPipeRecorder inC
@@ -53,8 +55,8 @@ mkPipeEnvG
   :: ( MonadIO m
      , MonadCatch m
      )
-  => FilterFuncT (ChanT.InChanI IstatdDatum) (ChanT.InChanI a) m
-  -> m ((ChanT.OutChanI IstatdDatum), ChanT.InChanI a)
+  => FilterFuncT (ChanT.InChanI (Summed '[IstatdDatum])) (ChanT.InChanI (Summed as)) m
+  -> m ((ChanT.OutChanI (Summed '[IstatdDatum])), ChanT.InChanI (Summed as))
 mkPipeEnvG ps = do
   (inC, outC) <- newZChan
   sink <- mkPipeRecorder inC
@@ -292,7 +294,7 @@ spec = do
     it "difference counters can come second?" $ do
       (res, res') <- runFakeMIO (newFakeStateIO defaultFakeTimerIO 0 defaultThreadDelayIO) $ do
         dstate <- mkDifferenceState
-        (tchan, pipeline) <- _t . mkPipeEnvG $ mkFilterSuffix "c"
+        (tchan, pipeline) <- mkPipeEnvG $ mkFilterSuffix "c"
                                      .:>. mkFilterPrefix "a"
                                      .:>. mkFilterDifference dstate
                                      .:>. mkBuffer 1000
@@ -326,8 +328,9 @@ spec = do
       res100 `shouldBe` (IstatdDatum Gauge "CounterName.100th" 0 99)
 
 
+ensureNoLeftovers :: MonadIO m => ChanT.OutChanI (Summed as) -> m ()
 ensureNoLeftovers c = liftIO $ do
-  res <- (readChan c >> return False) `catch` \(_ :: ChannelException) -> return True
+  res <- (readRaw c >> return False) `catch` \(_ :: ChannelException) -> return True
   res `shouldBe` True
 
 -- `main` is here so that this module can be run from GHCi on its own.  It is

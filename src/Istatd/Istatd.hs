@@ -9,6 +9,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
@@ -233,7 +234,7 @@ mkFilterPipeline sink fs =
 -- | Difference filter. Allows the recording of monotonically increasing counters as
 -- the rate at which they change. Needs to come first in a pipeline, see `mkFilterPipelineWithSource`.
 mkFilterDifference
-  :: forall m ci co as bs
+  :: forall as bs m ci co
    . ( MonadIO m
      , ChanLike ci co bs
      , ChanLike ci co as
@@ -267,10 +268,11 @@ mkFilterDifference dstate = \out -> do
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterPrefix
-  :: forall m ci co a as
+  :: forall as a m ci co
    . ( MonadIO m
      , ChanLike ci co as
      , MonadBaseControl IO m
+     , '[a] :<<: as
      , a :<: as
      , IfCxt (HasKey a)
      )
@@ -282,17 +284,22 @@ mkFilterPrefix prefix = \out -> do
       uk r@(getKey -> k) =
         let nk = prefix <> k
         in updateKey r nk
-      ifHasKey :: a -> m ()
-      ifHasKey v = writeChan out $ ifCxt (Proxy :: Proxy (HasKey a)) uk (id) v
-  goM_ $ forever $ ifHasKey =<< readChan outC
+      ifHasKeyI :: ( IfCxt (HasKey a)
+                   , a :<: as
+                   ) => Summed as -> m ()
+      ifHasKeyI v = case outj @a v of
+          Just (d) -> writeChan out $ ifCxt (Proxy :: (Proxy (HasKey a))) uk id d
+          Nothing -> writeRaw out v
+  goM_ $ forever $ (ifHasKeyI =<< readRaw outC)
   return inC
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterSuffix
-  :: forall m ci co a as
+  :: forall as a m ci co
    . ( MonadIO m
      , ChanLike ci co as
      , MonadBaseControl IO m
+     , '[a] :<<: as
      , a :<: as
      , IfCxt (HasKey a)
      )
@@ -304,9 +311,13 @@ mkFilterSuffix suffix = \out -> do
       uk r@(getKey -> k) =
         let nk = k <> suffix
         in updateKey r nk
-      ifHasKey :: a -> m ()
-      ifHasKey v = writeChan out $ ifCxt (Proxy :: Proxy (HasKey a)) uk (id) v
-  goM_ $ forever $ ifHasKey =<< readChan outC
+      ifHasKeyI :: ( IfCxt (HasKey a)
+                   , a :<: as
+                   ) => Summed as -> m ()
+      ifHasKeyI v = case outj @a v of
+          Just (d) -> writeChan out $ ifCxt (Proxy :: (Proxy (HasKey a))) uk id d
+          Nothing -> writeRaw out v
+  goM_ $ forever $ (ifHasKeyI =<< readRaw outC)
   return inC
 
 -- | Creates a sized buffer for messages going through this pipeline

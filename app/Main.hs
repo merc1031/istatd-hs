@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 module Main where
 
 import            Control.Monad           ( forever )
@@ -15,16 +16,16 @@ main :: IO ()
 main = runAppM' $ do
   (sink :: ChanT.InChanI (Summed '[IstatdDatum])) <- mkPrintingEncodedRecorder
   stats <- mkPipelineWithSink sink $ mkMonitoredBuffer "monitor" 5
-                                .:>. mkFilterPrefix "Hi."
-                                .:>. mkFilterSuffix ".no"
+                                .:>. mkFilterPrefix @('[IstatdDatum]) @IstatdDatum "Hi."
+                                .:>. mkFilterSuffix @('[IstatdDatum]) @IstatdDatum ".no"
 
 
 
   let percentiles = mkPercentiles [10, 90, 95, 99]
 
   percetilestats <- mkPipelineWithSink sink $ mkPercentileFilter 5 percentiles
-                                         .:>. mkFilterPrefix "Another."
-                                         .:>. mkFilterSuffix ".Pipeline"
+                                         .:>. mkFilterPrefix @('[IstatdDatum]) @IstatdDatum "Another."
+                                         .:>. mkFilterSuffix @('[IstatdDatum]) @IstatdDatum ".Pipeline"
 
   forever $ do
     t <- getPOSIXTime

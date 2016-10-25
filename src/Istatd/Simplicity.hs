@@ -35,6 +35,7 @@ instance Summable (f ': fs) where
   data Summed (f ': fs) = Here f
                         | Elsewhere (Summed fs)
 
+
 class Subsume (f :: *) (fs :: [*]) where
   inj :: f -> Summed fs
   outj :: Summed fs -> Maybe f
@@ -51,12 +52,16 @@ instance {-# OVERLAPPABLE #-} Subsume f fs => Subsume f (g ': fs) where
   outj (Here _)         = Nothing
   outj (Elsewhere fa)   = outj fa
 
+
+
 class ( Summable fs
       , Subsume f fs
       ) => (f :: *) :<: (fs :: [*])
 instance ( Summable fs
          , Subsume f fs
          ) => (f :<: fs)
+
+
 
 class Subsume' (fs :: [*]) (ss :: [*]) where
   inj' :: Summed fs -> Maybe (Summed ss)
@@ -67,7 +72,7 @@ instance {-# OVERLAPS #-} (fs ~ gs) => Subsume' fs gs where
   inj' = Just . id
   outj' = Just
 
-instance {-# OVERLAPPABLE #-} Subsume' fs os => Subsume' (f ': fs) (f ': os) where
+instance {-# OVERLAPS #-} Subsume' fs os => Subsume' (f ': fs) (f ': os) where
   inj' (Here a) = Just $ Here a
   inj' (Elsewhere a) = Elsewhere <$> inj' a
 
@@ -82,18 +87,12 @@ instance {-# OVERLAPPABLE #-} Subsume' '[] (g ': os) where
 instance {-# OVERLAPPABLE #-} (Subsume f os, Subsume' fs (g ': os)) => Subsume' (f ': fs) (g ': os) where
   inj' (Here a) = Just $ Elsewhere $ inj @f @os a
   inj' (Elsewhere a) = inj' @fs @(g ': os) a
---    case outj a of
---                      Just a' -> Just $ inj a'
---                      Nothing -> Nothing
---  inj' (Elsewhere a) = Elsewhere <$> inj' a
 
   outj' (Here _) = Nothing
---  outj' (Here a) = case outj @g @os a of
---                     Just a' -> Just $ inj @g @fs a'
---                     Nothing -> Nothing
   outj' (Elsewhere a) = case outj @f @os a of
                           Just a' -> Just $ inj @f @(f ': fs) a'
                           Nothing -> Nothing
+
 
 class ( Summable sub
       , Summable sum
@@ -103,33 +102,10 @@ instance ( Summable sub
          , Summable sum
          , Subsume' sub sum
          ) => (sub :<<: sum)
---class Outjectable' (fs :: [*]) (os :: [*]) where
---  outj' :: Summed fs -> Maybe (Summed os)
---
---instance Outjectable' (f ': fs) (f ': os) where
---  outj' (Here fa) = Just (inj fa)
---  outj' (Elsewhere _) = Nothing
---
---instance {-# OVERLAPPABLE #-} (f :<: os, fs :<<: os, Outjectable' fs os) => Outjectable' (f ': fs) (g ': os) where
---  outj' (Here fa) = Just $ inj fa
---  outj' (Elsewhere fa) = case outj' fa of
---                           Just a -> Just $ inj a
---                           Nothing -> Nothing
 
 
---class ( Summable fs
---      , Summable os
---      ) => (fs :: [*]) :<<: (os :: [*])
---instance ( 
---          Summable os
---         ) => (f ': fs) :<<: (os)
 
---class ForS (fs :: [*]) where
---  forS :: Monad m => fs -> (f -> m ()) -> m ()
---
---instance ForS (f ': fs) where
---  forS
---
+
 test :: forall (sub :: [*]) (sum :: [*]) e
       . ( Show e
         , Subsume' sub sum
