@@ -10,7 +10,6 @@
 {-# LANGUAGE InstanceSigs #-}
 module Istatd.Chan.ChanT where
 
-import Data.Maybe
 import            Control.Arrow                           ( (***) )
 import            Control.Concurrent.STM                  ( TVar
                                                           , modifyTVar'

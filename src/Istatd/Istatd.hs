@@ -5,6 +5,7 @@
 {-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -13,6 +14,7 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 module Istatd.Istatd
 ( ChanLike (..)
 , IstatdDatum (..)
@@ -75,7 +77,6 @@ import            Istatd.Client                       ( IstatdConfig (..)
                                                       )
 import            Istatd.Control.Monad                ( (<<) )
 import            Istatd.Datum.DifferenceCounter      ( DifferenceCounter (..)
-                                                      , DifferenceCounterIsh (..)
                                                       , DifferenceState (..)
                                                       , mkDifferenceState
                                                       , computeDifferenceCounter
@@ -115,7 +116,7 @@ infixr 1 .<:., `prependF`
 
 mkPipelineWithSinkM
   :: ( MonadIO m
-     , IstatdDatum :<: as
+     , '[IstatdDatum] :<<: as
      )
   => m (ci (Summed '[IstatdDatum]))
   -> FilterFuncT (ci (Summed '[IstatdDatum])) (ci (Summed as)) m
@@ -126,7 +127,7 @@ mkPipelineWithSinkM sinkA pipe = do
 
 mkPipelineWithSink
   :: ( MonadIO m
-     , IstatdDatum :<: as
+     , '[IstatdDatum] :<<: as
      )
   => ci (Summed '[IstatdDatum])
   -> FilterFuncT (ci (Summed '[IstatdDatum])) (ci (Summed as)) m
@@ -141,12 +142,14 @@ mkPipelineWithSink sink pipe = do
 prependF
   :: forall (m :: * -> *) (ci :: * -> *) injest inter next
    . ( Monad m
+     , inter :<<: injest
+     , next :<<: inter
      )
-  => FilterFuncT (ci next) (ci inter) m
+  => FilterFuncT (ci (Summed next)) (ci (Summed inter)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci inter) (ci injest) m
+  -> FilterFuncT (ci (Summed inter)) (ci (Summed injest)) m
   -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Summed next)) (ci (Summed injest)) m
   -- ^ New sink end of the current pipeline chain
 prependF = (.<:.)
 
@@ -155,12 +158,14 @@ prependF = (.<:.)
 appendF
   :: forall (m :: * -> *) (ci :: * -> *) injest inter next
    . ( Monad m
+     , inter :<<: injest
+     , next :<<: inter
      )
-  => FilterFuncT (ci inter) (ci injest) m
+  => FilterFuncT (ci (Summed inter)) (ci (Summed injest)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci next) (ci inter) m
+  -> FilterFuncT (ci (Summed next)) (ci (Summed inter)) m
   -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Summed next)) (ci (Summed injest)) m
   -- ^ New sink end of the current pipeline chain
 appendF = (.:>.)
 
@@ -169,14 +174,17 @@ appendF = (.:>.)
 (.<:.)
   :: forall (m :: * -> *) (ci :: * -> *) injest inter next
    . ( Monad m
+     , inter :<<: injest
+     , next :<<: inter
      )
-  => FilterFuncT (ci next) (ci inter) m
+  => FilterFuncT (ci (Summed next)) (ci (Summed inter)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci inter) (ci injest) m
+  -> FilterFuncT (ci (Summed inter)) (ci (Summed injest)) m
   -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Summed next)) (ci (Summed injest)) m
   -- ^ New sink end of the current pipeline chain
 fl .<:. fr = fl >=> fr
+-- \y -> (\x -> fl x) (fromJust . outj' . fr $ y)
 
 --writeIt :: forall ci c a m (cs :: [* -> *])
 --         . ( Sendable a :<: cs
@@ -187,19 +195,19 @@ fl .<:. fr = fl >=> fr
 -- | Append a filter in the pipeline.
 -- Synonym for `.:>.`, analagous to `>=>`
 (.:>.)
-  :: forall (m :: * -> *) (ci :: * -> *) injest inter inter2 next
+  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
    . ( Monad m
      , inter :<<: injest
-     , inter2 :<<: inter
-     , next :<<: inter2
+     , next :<<: inter
      )
   => FilterFuncT (ci (Summed inter)) (ci (Summed injest)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci (Summed next)) (ci (Summed inter2)) m
+  -> FilterFuncT (ci (Summed next)) (ci (Summed inter)) m
   -- ^ Sink end to add to the pipeline chain
   -> FilterFuncT (ci (Summed next)) (ci (Summed injest)) m
   -- ^ New sink end of the current pipeline chain
-fl .:>. fr = fl <=< fr
+(.:>.) = flip (.<:.)
+-- \y -> (\x -> fl x) (fromJust . outj' . fr $ y)
 
 
 -- | Composes a sink, a specific (possibly differently typed) source, and many
@@ -348,11 +356,10 @@ mkSlowdownBuffer
   :: ( MonadCatch m
      , MonadIO m
      , ChanLike ci co as
-     , ChanLike ci co os
      , SupportsTime m
      , MonadBaseControl IO m
-     , as :<<: os
-     , as ~ os
+--     , as :<<: os
+    , as ~ os
      )
   => Int
   -> Int
@@ -426,7 +433,7 @@ mkPipeRecorder
   -> m (ci (Summed as))
 mkPipeRecorder c = do
   (inC, outC) <- newZChan
-  let action :: (MonadIO m) => m ()
+  let 
       action = goM_ $ forever $ (writeChan c . toData :: a -> m ()) =<< (readChan outC :: m a)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC

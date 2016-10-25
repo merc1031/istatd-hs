@@ -1,12 +1,15 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE InstanceSigs #-}
 module Istatd.Chan.Chan where
 
-import            Data.Maybe
 import            Control.Arrow                           ( (***) )
 import            Control.DeepSeq                         ( NFData (..) )
 import            Control.Exception                       ( BlockedIndefinitelyOnMVar )
