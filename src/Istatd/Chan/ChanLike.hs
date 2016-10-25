@@ -12,6 +12,7 @@ import          Control.Monad.IO.Class      ( MonadIO )
 import          Control.Exception           ( Exception )
 import          Data.Typeable               ( Typeable )
 import Istatd.Simplicity
+import Data.Maybe
 
 data ChannelException = ChannelBlockedException
                       deriving (Show, Typeable)
@@ -45,6 +46,19 @@ class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*]) | cit as -> cot as, c
     => Int
     -> m (cit (Summed as), cot (Summed as))
 
+  readRaw
+    :: forall m
+     . MonadIO m
+    => (cot (Summed as))
+    -> m (Summed as)
+
+  writeRaw
+    :: forall m
+     . MonadIO m
+    => (cit (Summed as))
+    -> Summed as
+    -> m ()
+
   writeChan
     :: forall a m
      . ( MonadIO m
@@ -53,6 +67,7 @@ class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*]) | cit as -> cot as, c
     => (cit (Summed as))
     -> a
     -> m ()
+
   readChan
     :: forall a m
      . ( MonadIO m
@@ -60,6 +75,15 @@ class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*]) | cit as -> cot as, c
        )
     => (cot (Summed as))
     -> m a
+  readChan c = fromJust <$> (readChanM c)
+
+  readChanM
+    :: forall a m
+     . ( MonadIO m
+       , a :<: as
+       )
+    => (cot (Summed as))
+    -> m (Maybe a)
 
   inChanLen
     :: MonadIO m

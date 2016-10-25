@@ -63,3 +63,18 @@ instance ( Summable fs
          , Injectable f fs
          , Outjectable f fs
          ) => (f :<: fs)
+
+
+class ( Summable fs
+      , Summable os
+      ) => (fs :: [*]) :<<: (os :: [*])
+instance ( f :<: fs
+         , f :<: os
+         , fs :<<: os
+         ) => (f ': fs) :<<: (os)
+
+--class ForS (fs :: [*]) where
+--  forS :: Monad m => fs -> (f -> m ()) -> m ()
+--
+--instance ForS (f ': fs) where
+--  forS

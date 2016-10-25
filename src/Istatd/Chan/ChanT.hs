@@ -44,7 +44,9 @@ instance ChanLike InChanI OutChanI (as :: [*]) where
   newZChan   = iNewZChan
   newBChan   = iNewBChan
   writeChan  = iWriteChan
-  readChan   = iReadChan
+  readChanM   = iReadChanM
+  writeRaw  = iWriteRaw
+  readRaw   = iReadRaw
   inChanLen  = iInChanLen
   outChanLen = iOutChanLen
 
@@ -64,6 +66,27 @@ instance NFData (OutChanI a) where
   rnf (ZOutChan !_chan) = ()
   rnf (BOutChan !_ref !_chan) = ()
 
+iWriteRaw
+  :: ( MonadIO m
+     )
+  => InChanI (Summed as)
+  -> Summed as
+  -> m ()
+iWriteRaw (ZInChan uchan) r =
+  liftIO $ handleBlocked $ U.writeChan uchan $ r
+iWriteRaw (BInChan c buchan) r =
+  liftIO $ handleBlocked $ BU.writeChan buchan (r) >> (modLen c (+))
+
+iReadRaw
+  :: ( MonadIO m
+     )
+  => OutChanI (Summed as)
+  -> m (Summed as)
+iReadRaw (ZOutChan uchan) =
+  (liftIO $ handleBlocked $ U.readChan uchan)
+iReadRaw (BOutChan c buchan) =
+  (liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r)
+
 iWriteChan
   :: ( MonadIO m
      , a :<: as
@@ -76,16 +99,16 @@ iWriteChan (ZInChan uchan) r =
 iWriteChan (BInChan c buchan) r =
   liftIO $ handleBlocked $ BU.writeChan buchan (inj $ r) >> modLen c (+)
 
-iReadChan
+iReadChanM
   :: ( MonadIO m
      , a :<: as
      )
   => OutChanI (Summed as)
-  -> m a
-iReadChan (ZOutChan uchan) =
-  (fromJust . outj) <$> (liftIO $ handleBlocked $ U.readChan uchan)
-iReadChan (BOutChan c buchan) =
-  (fromJust . outj) <$> (liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r)
+  -> m (Maybe a)
+iReadChanM (ZOutChan uchan) =
+  (outj) <$> (liftIO $ handleBlocked $ U.readChan uchan)
+iReadChanM (BOutChan c buchan) =
+  (outj) <$> (liftIO $ handleBlocked $ BU.readChan buchan >>= \r -> (modLen c (-)) >> return r)
 
 iOutChanLen
   :: (MonadIO m)

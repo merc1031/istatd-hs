@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module Main where
@@ -8,22 +9,22 @@ import            Istatd.Istatd
 import            System.Random
 
 import qualified  Istatd.Chan.ChanT       as ChanT
+import Istatd.Simplicity
 
 main :: IO ()
 main = runAppM' $ do
-  (sink :: ChanT.InChanI IstatdDatum) <- mkPrintingEncodedRecorder
-  stats <- mkFilterPipeline sink [ mkMonitoredBuffer "monitor" 5
-                                 , mkFilterPrefix "Hi."
-                                 , mkFilterSuffix ".no"
-                                 ]
+  (sink :: ChanT.InChanI (Summed '[IstatdDatum])) <- mkPrintingEncodedRecorder
+  stats <- mkPipelineWithSink sink $ mkMonitoredBuffer "monitor" 5
+                                .:>. mkFilterPrefix "Hi."
+                                .:>. mkFilterSuffix ".no"
+
 
 
   let percentiles = mkPercentiles [10, 90, 95, 99]
 
-  percetilestats <- mkFilterPipeline sink [ mkPercentileFilter 5 percentiles
-                                          , mkFilterPrefix "Another."
-                                          , mkFilterSuffix ".Pipeline"
-                                          ]
+  percetilestats <- mkPipelineWithSink sink $ mkPercentileFilter 5 percentiles
+                                         .:>. mkFilterPrefix "Another."
+                                         .:>. mkFilterSuffix ".Pipeline"
 
   forever $ do
     t <- getPOSIXTime

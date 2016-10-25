@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -100,7 +101,7 @@ import            Istatd.Types                        ( IstatdDatum(..)
                                                       , FilterFuncT
                                                       , toPacket
                                                       )
-import Istatd.Complexity
+import Istatd.Simplicity
 import            IfCxt
 import            Data.Proxy
 
@@ -114,20 +115,22 @@ infixr 1 .<:., `prependF`
 
 mkPipelineWithSinkM
   :: ( MonadIO m
+     , IstatdDatum :<: as
      )
-  => m (ci IstatdDatum)
-  -> FilterFuncT (ci IstatdDatum) (ci a) m
-  -> m (ci a)
+  => m (ci (Summed '[IstatdDatum]))
+  -> FilterFuncT (ci (Summed '[IstatdDatum])) (ci (Summed as)) m
+  -> m (ci (Summed as))
 mkPipelineWithSinkM sinkA pipe = do
   sink <- sinkA
   mkPipelineWithSink sink pipe
 
 mkPipelineWithSink
   :: ( MonadIO m
+     , IstatdDatum :<: as
      )
-  => ci IstatdDatum
-  -> FilterFuncT (ci IstatdDatum) (ci a) m
-  -> m (ci a)
+  => ci (Summed '[IstatdDatum])
+  -> FilterFuncT (ci (Summed '[IstatdDatum])) (ci (Summed as)) m
+  -> m (ci (Summed as))
 mkPipelineWithSink sink pipe = do
   inC <- pipe sink
   return inC
@@ -184,14 +187,17 @@ fl .<:. fr = fl >=> fr
 -- | Append a filter in the pipeline.
 -- Synonym for `.:>.`, analagous to `>=>`
 (.:>.)
-  :: forall (m :: * -> *) (ci :: * -> *) injest inter next
+  :: forall (m :: * -> *) (ci :: * -> *) injest inter inter2 next
    . ( Monad m
+     , inter :<<: injest
+     , inter2 :<<: inter
+     , next :<<: inter2
      )
-  => FilterFuncT (ci inter) (ci injest) m
+  => FilterFuncT (ci (Summed inter)) (ci (Summed injest)) m
   -- ^ Rest of the pipeline
-  -> FilterFuncT (ci next) (ci inter) m
+  -> FilterFuncT (ci (Summed next)) (ci (Summed inter2)) m
   -- ^ Sink end to add to the pipeline chain
-  -> FilterFuncT (ci next) (ci injest) m
+  -> FilterFuncT (ci (Summed next)) (ci (Summed injest)) m
   -- ^ New sink end of the current pipeline chain
 fl .:>. fr = fl <=< fr
 
@@ -219,41 +225,49 @@ mkFilterPipeline sink fs =
 -- | Difference filter. Allows the recording of monotonically increasing counters as
 -- the rate at which they change. Needs to come first in a pipeline, see `mkFilterPipelineWithSource`.
 mkFilterDifference
-  :: forall m ci co a
+  :: forall m ci co as bs
    . ( MonadIO m
-     , ChanLike ci co IstatdDatum
-     , ChanLike ci co a
-     , IfCxt (DifferenceCounterIsh a)
-     , IfCxt (IstatdData a)
+     , ChanLike ci co bs
+     , ChanLike ci co as
+--     , IfCxt (DifferenceCounterIsh a)
+--     , IfCxt (IstatdData a)
      , MonadBaseControl IO m
+     , DifferenceCounter :<: as
+     , IstatdDatum :<: bs
      )
   => DifferenceState
-  -> FilterFuncT (ci IstatdDatum) (ci a) m
+  -> FilterFuncT (ci (Summed bs)) (ci (Summed as)) m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
   let --action dc = writeChan out =<< computeDifferenceCounter dstate dc
-      ifDiffCounter :: a -> m ()
-      ifDiffCounter v = writeChan out =<< (ifCxt (Proxy :: Proxy (DifferenceCounterIsh a))
-                                                (computeDifferenceCounter dstate . toDiff)
-                                                (\s -> return $ ifCxt (Proxy :: Proxy (IstatdData a))
-                                                                      toData
-                                                                      (error "Difference needs to resolve to istatddata")
-                                                                      s
-                                                ) v
-                                          )
-  goM_ $ forever $ ifDiffCounter =<< readChan outC
+      --ifDiffCounter :: a -> m ()
+      --ifDiffCounter v = writeChan out =<< (ifCxt (Proxy :: Proxy (DifferenceCounterIsh a))
+      --                                          (computeDifferenceCounter dstate . toDiff)
+      --                                          (\s -> return $ ifCxt (Proxy :: Proxy (IstatdData a))
+      --                                                                toData
+      --                                                                (error "Difference needs to resolve to istatddata")
+      --                                                                s
+      --                                          ) v
+      --                                    )
+      ifDiffCounter ::
+                    Maybe DifferenceCounter
+                    -> m ()
+      ifDiffCounter (Just d) = writeChan out =<< computeDifferenceCounter dstate d
+      ifDiffCounter Nothing = return ()
+  goM_ $ forever $ ifDiffCounter =<< readChanM outC
   return inC
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterPrefix
-  :: forall m ci co a
+  :: forall m ci co a as
    . ( MonadIO m
-     , ChanLike ci co a
+     , ChanLike ci co as
      , MonadBaseControl IO m
+     , a :<: as
      , IfCxt (HasKey a)
      )
   => BSLB.Builder
-  -> FilterFuncT (ci a) (ci a) m
+  -> FilterFuncT (ci (Summed as)) (ci (Summed as)) m
 mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
   let uk :: (HasKey a) => a -> a
@@ -267,14 +281,15 @@ mkFilterPrefix prefix = \out -> do
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterSuffix
-  :: forall m ci co a
+  :: forall m ci co a as
    . ( MonadIO m
-     , ChanLike ci co a
+     , ChanLike ci co as
      , MonadBaseControl IO m
+     , a :<: as
      , IfCxt (HasKey a)
      )
   => BSLB.Builder
-  -> FilterFuncT (ci a) (ci a) m
+  -> FilterFuncT (ci (Summed as)) (ci (Summed as)) m
 mkFilterSuffix suffix = \out -> do
   (inC, outC) <- newZChan
   let uk :: (HasKey a) => a -> a
@@ -290,13 +305,13 @@ mkFilterSuffix suffix = \out -> do
 mkBuffer
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co as
      )
   => Int
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFunc (ci (Summed as)) m
 mkBuffer size = \out -> do
   (inC, outC) <- newBChan size
-  let action = go_ $ forever $ writeChan out =<< readChan outC
+  let action = go_ $ forever $ writeRaw out =<< readRaw outC
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Buffer died" >> return ()
   return inC
 
@@ -305,16 +320,17 @@ mkBuffer size = \out -> do
 mkMonitoredBuffer
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co as
+     , IstatdDatum :<: as
      , SupportsTime m
      , MonadBaseControl IO m
      )
   => BSLB.Builder
   -> Int
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFunc (ci (Summed as)) m
 mkMonitoredBuffer name size = \out -> do
   (inC, outC) <- newBChan size
-  let action = go_ $ forever $ writeChan out =<< (readChan outC)
+  let action = go_ $ forever $ writeRaw out =<< (readRaw outC)
   ticker <- tick 1
   let recordAction =
         let channelAction =
@@ -331,16 +347,19 @@ mkMonitoredBuffer name size = \out -> do
 mkSlowdownBuffer
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co as
+     , ChanLike ci co os
      , SupportsTime m
      , MonadBaseControl IO m
+     , as :<<: os
+     , as ~ os
      )
   => Int
   -> Int
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFuncT (ci (Summed as)) (ci (Summed os)) m
 mkSlowdownBuffer time size = \out -> do
   (inC, outC) <- newBChan size
-  let action = goM_ $ forever $ writeChan out =<< (readChan outC << threadDelay time)
+  let action = goM_ $ forever $ writeRaw out =<< (readRaw outC << threadDelay time)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "MonitoredBuffer died" >> return ()
   return inC
 
@@ -351,13 +370,14 @@ mkSlowdownBuffer time size = \out -> do
 mkPercentileFilter
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co as
+     , IstatdDatum :<: as
      , SupportsTime m
      , MonadBaseControl IO m
      )
   => Int
   -> [Percentile]
-  -> FilterFunc (ci IstatdDatum) m
+  -> FilterFunc (ci (Summed as)) m
 mkPercentileFilter seconds percentiles = \out -> do
   (inC, outC) <- newZChan
   pstate <- mkPercentileState
@@ -378,43 +398,51 @@ mkPercentileFilter seconds percentiles = \out -> do
 
 -- | Simple sink, Reads the pipeline into void
 mkNullRecorder
-  :: ( MonadCatch m
+  :: forall m ci co
+   . ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co '[IstatdDatum]
+     , MonadBaseControl IO m
      )
-  => m (ci IstatdDatum)
+  => m (ci (Summed '[IstatdDatum]))
 mkNullRecorder = do
   (inC, outC) <- newZChan
-  let action = go_ $ forever $ void $ readChan outC
+  let action = goM_ $ forever $ void $ (readChan outC :: m IstatdDatum)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
 -- | A sink that allows a channel to be passed in and handled elsewhere
 mkPipeRecorder
-  :: ( MonadCatch m
+  :: forall m ci co as a
+   . ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co a
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co as
+     , ChanLike ci co '[IstatdDatum]
+     , a :<: as
      , IstatdData a
+     , MonadBaseControl IO m
      )
-  => ci IstatdDatum
-  -> m (ci a)
+  => ci (Summed '[IstatdDatum])
+  -> m (ci (Summed as))
 mkPipeRecorder c = do
   (inC, outC) <- newZChan
-  let action = go_ $ forever $ (writeChan c . toData) =<< (readChan outC)
+  let action :: (MonadIO m) => m ()
+      action = goM_ $ forever $ (writeChan c . toData :: a -> m ()) =<< (readChan outC :: m a)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
 -- | A sink that prints to stdout using show
 mkPrintingRecorder
-  :: ( MonadCatch m
+  :: forall m ci co
+   . ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co '[IstatdDatum]
+     , MonadBaseControl IO m
      )
-  => m (ci IstatdDatum)
+  => m (ci (Summed '[IstatdDatum]))
 mkPrintingRecorder = do
   (inC, outC) <- newZChan
-  let action = go_ $ forever $ putStrLn . show =<< readChan outC
+  let action = goM_ $ forever $ liftIO . putStrLn . show =<< (readChan outC :: m IstatdDatum)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 
@@ -422,9 +450,9 @@ mkPrintingRecorder = do
 mkPrintingEncodedRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co '[IstatdDatum]
      )
-  => m (ci IstatdDatum)
+  => m (ci (Summed '[IstatdDatum]))
 mkPrintingEncodedRecorder = do
   (inC, outC) <- newZChan
   let action = go_ $ forever $ putStrLn . show . toPacket =<< readChan outC
@@ -435,10 +463,10 @@ mkPrintingEncodedRecorder = do
 mkIstatdRecorder
   :: ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co IstatdDatum
+     , ChanLike ci co '[IstatdDatum]
      )
   => IstatdConfig
-  -> m (ci IstatdDatum)
+  -> m (ci (Summed '[IstatdDatum]))
 mkIstatdRecorder config = do
   (inC, outC) <- newZChan
   connection <- connect config
