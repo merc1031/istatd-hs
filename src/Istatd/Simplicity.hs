@@ -25,6 +25,10 @@ module Istatd.Simplicity where
 
 import            Data.Void                               (Void)
 
+data Nat where
+  Zero :: Nat
+  Succ :: Nat -> Nat
+
 class Summable (fs :: [*]) where
   data Summed fs :: *
 
@@ -115,62 +119,108 @@ instance ( Summable sub
          , SubsumedBy sub sum
          ) => (sub :<<: sum)
 
+-- Algorithm for finding the proper Summed conversions type
+-- find small               ::   [a,b]
+-- in   larger              ::   [b,c,a]
+-- as pairs of (Nat,Type)   ::   [(S S S Z, a), (S Z, b)]
+-- producing a              ::   Summed larger -> Maybe (Summed '[a,b])
+--
+-- find small               ::   [a,b]
+-- in   larger              ::   [b,c]
+-- as pairs of (Nat,Type)   ::   [(Z, a), (S Z, b)]
+-- producing a              ::   Summed larger -> Maybe (Summed '[b])
+--
+class SomeSubsumed (choose :: [*]) (all :: [*]) where
+  soutj :: SomeSubsumed' choose all --Summed all -> Maybe (Summed '[choose])
 
-class SomeSubsumed1 (choose :: *) (all :: [*]) where
-  soutj1 :: Summed all -> Maybe (Summed '[choose])
+instance SomeSubsumed c c where
+  soutj = Just . id
 
-instance SomeSubsumed1 c '[] where
-  soutj1 _ = Nothing
+type family SomeSubsumed' (choose :: [*]) (all :: [*]) where
+--  SomeSubsumed' (c ': choose') (c ': all') = Summed all -> Maybe (Summed '[c])
+  SomeSubsumed' choose choose = Summed choose -> Maybe (Summed choose)
+  SomeSubsumed' choose all = SomeSubsumed'' (ListIdxs choose all) choose all
 
-instance SomeSubsumed1 c (c ': '[]) where
-  soutj1 = Just . id
+type family SomeSubsumed'' (ns :: [(Nat, *)]) (choose :: [*]) (all :: [*]) where
+  SomeSubsumed'' ns choose all = Summed all -> Maybe (Summed (Rearrange ns))
 
-instance {-# OVERLAPPABLE #-} SomeSubsumed1 c (c ': cs) where
-  soutj1 (Here a) = Just . inj $ a
-  soutj1 (Elsewhere _) = Nothing
+type family Rearrange (ns :: [(Nat, *)]) :: [*] where
+  Rearrange '[]                      = '[]
+  Rearrange ( '( 'Zero, a)    ': ns) = Rearrange ns
+  Rearrange ( '( 'Succ s, a)  ': ns) = a ': Rearrange ns
 
-instance {-# OVERLAPPABLE #-} SomeSubsumed1 c (b ': '[]) where
-  soutj1 _ = Nothing
+--type family ListIdxs (
+type family ListIdxs (cs :: [*]) (ls :: [*]) :: [(Nat, *)] where
+  ListIdxs '[]       ls = '[]
+  ListIdxs (c ': cs) ls = '(ListIdx c ls, c) ': ListIdxs cs ls
 
-instance {-# OVERLAPPABLE #-} (SomeSubsumed1 c cs) => SomeSubsumed1 c (b ': cs) where
-  soutj1 (Here _) = Nothing
-  soutj1 (Elsewhere a) = soutj1 a
+type family ListIdx (c :: *) (ls :: [*]) :: Nat where
+  ListIdx c '[]         = 'Zero
+  ListIdx c (c ': cs)   = 'Succ 'Zero
+  ListIdx c (b ': cs)   = 'Succ (ListIdx c cs)
 
 
-class SomeSubsumed2 (choose :: (*,*)) (all :: [*]) where
-  soutj2 :: Summed all -> Maybe (Summed (Uncurry choose))
-
-instance SomeSubsumed2 '(c,c1) '[] where
-  soutj2 _ = Nothing
-
-instance SomeSubsumed2 '(c,c1) (c ': '[]) where
-  soutj2 = Just . id
-
-instance SomeSubsumed2 '(c1,c) (c ': '[]) where
-  soutj2 = Just . id
-
-instance {-# OVERLAPPABLE #-} SomeSubsumed2 '(c,c1) (c ': cs) where
-  soutj2 (Here a) = Just . inj $ a
-  soutj2 (Elsewhere _) = Nothing
-
-instance {-# OVERLAPPABLE #-} SomeSubsumed2 '(c1,c) (c ': cs) where
-  soutj2 (Here a) = Just . inj $ a
-  soutj2 (Elsewhere _) = Nothing
-
-instance {-# OVERLAPPABLE #-} SomeSubsumed2 '(c1,c) (b ': '[]) where
-  soutj2 _ = Nothing
-
-instance {-# OVERLAPPABLE #-} (SomeSubsumed2 '(c,c1) cs) => SomeSubsumed2 '(c,c1) (b ': cs) where
-  soutj2 (Here _) = Nothing
-  soutj2 (Elsewhere a) = soutj2 a
-
-class SomeSubsumed3 (choose :: (*,*,*)) (all :: [*]) where
-  soutj3 :: Summed all -> Maybe (Summed (Uncurry choose))
-
-type family Uncurry (t :: k) :: [*] where
-  Uncurry '(a,b) = '[a,b]
-  Uncurry '(a,b,c) = '[a,b,c]
-  Uncurry '(a,b,c,d) = '[a,b,c,d]
+--class SomeSubsumed1 (choose :: *) (all :: [*]) where
+--  soutj1 :: Summed all -> Maybe (Summed '[choose])
+--
+--instance SomeSubsumed1 c '[] where
+--  soutj1 _ = Nothing
+--
+--instance SomeSubsumed1 c (c ': '[]) where
+--  soutj1 = Just . id
+--
+--instance {-# OVERLAPPABLE #-} SomeSubsumed1 c (c ': cs) where
+--  soutj1 (Here a) = Just . inj $ a
+--  soutj1 (Elsewhere _) = Nothing
+--
+--instance {-# OVERLAPPABLE #-} SomeSubsumed1 c (b ': '[]) where
+--  soutj1 _ = Nothing
+--
+--instance {-# OVERLAPPABLE #-} (SomeSubsumed1 c cs) => SomeSubsumed1 c (b ': cs) where
+--  soutj1 (Here _) = Nothing
+--  soutj1 (Elsewhere a) = soutj1 a
+--
+--
+--class SomeSubsumed2 n (choose :: (*,*)) (all :: [*]) where
+--  soutj2 :: Summed all -> Maybe (Summed (Uncurry n choose))
+--
+----instance SomeSubsumed2 '(c,c1) '[] where
+----  soutj2 _ = Nothing
+--
+--instance SomeSubsumed2 Zero '(c,c1) (c ': '[]) where
+--  soutj2 = Just . id
+--
+--instance SomeSubsumed2 (Succ Zero) '(c1,c) (c ': '[]) where
+--  soutj2 = Just . id
+--
+--instance {-# OVERLAPPABLE #-} SomeSubsumed2 Zero '(c,c1) (c ': cs) where
+--  soutj2 (Here a) = Just . inj $ a
+--  soutj2 (Elsewhere _) = Nothing
+--
+--instance {-# OVERLAPPABLE #-} SomeSubsumed2 (Succ Zero) '(c1,c) (c ': cs) where
+--  soutj2 (Here a) = Just . inj $ a
+--  soutj2 (Elsewhere _) = Nothing
+--
+----instance {-# OVERLAPPABLE #-} SomeSubsumed2 '(c1,c) (b ': '[]) where
+----  soutj2 _ = Nothing
+--
+--instance {-# OVERLAPPABLE #-} (SomeSubsumed2 n '(c,c1) cs) => SomeSubsumed2 n '(c,c1) (b ': cs) where
+--  soutj2 (Here _) = Nothing
+--  soutj2 (Elsewhere a) = soutj2 a
+--
+--class SomeSubsumed3 (choose :: (*,*,*)) (all :: [*]) where
+--  soutj3 :: Summed all -> Maybe (Summed (Uncurry n choose))
+--
+--type family Uncurry (n :: Nat) (t :: k) (r :: [*]) | r -> t where
+--  Uncurry Zero                      '(a,b) = '[a]
+--  Uncurry (Succ Zero)               '(a,b) = '[b]
+--  Uncurry Zero                      '(a,b,c) = '[a]
+--  Uncurry (Succ Zero)               '(a,b,c) = '[b]
+--  Uncurry (Succ (Succ Zero))        '(a,b,c) = '[c]
+--  Uncurry Zero                      '(a,b,c,d) = '[a]
+--  Uncurry (Succ Zero)               '(a,b,c,d) = '[b]
+--  Uncurry (Succ (Succ Zero))        '(a,b,c,d) = '[c]
+--  Uncurry (Succ (Succ (Succ Zero))) '(a,b,c,d) = '[d]
 
 --class SomeSubsumed (choose :: [*]) (all :: [*]) where
 --  soutj :: Summed all -> Maybe (Summed (choose))
@@ -223,32 +273,40 @@ test v = case ((inj' @(sub) @(sum) $ (v ))) of
     Nothing -> return ()
   Nothing -> return ()
 
-testSomeSubsumed1 :: forall (choose :: *) (sum :: [*])
-                  . ( SomeSubsumed1 choose sum
+testSomeSubsumed :: forall (choose :: [*]) (sum :: [*])
+                  . ( SomeSubsumed choose sum
                     )
                  => Summed sum
                  -> IO ()
-testSomeSubsumed1 v = case soutj1 @choose @sum v of
+testSomeSubsumed v = case soutj @choose @sum v of
   Just _ -> putStrLn "found it"
   Nothing -> return ()
-
-testSomeSubsumed2 :: forall (choose :: (*,*)) (sum :: [*])
-                  . ( SomeSubsumed2 choose sum
-                    )
-                 => Summed sum
-                 -> IO ()
-testSomeSubsumed2 v = case soutj2 @choose @sum v of
-  Just _ -> putStrLn "found it"
-  Nothing -> return ()
-
-testSomeSubsumed3 :: forall (choose :: (*,*,*)) (sum :: [*])
-                  . ( SomeSubsumed3 choose sum
-                    )
-                 => Summed sum
-                 -> IO ()
-testSomeSubsumed3 v = case soutj3 @choose @sum v of
-  Just _ -> putStrLn "found it"
-  Nothing -> return ()
+--testSomeSubsumed1 :: forall (choose :: *) (sum :: [*])
+--                  . ( SomeSubsumed1 choose sum
+--                    )
+--                 => Summed sum
+--                 -> IO ()
+--testSomeSubsumed1 v = case soutj1 @choose @sum v of
+--  Just _ -> putStrLn "found it"
+--  Nothing -> return ()
+--
+--testSomeSubsumed2 :: forall (choose :: (*,*)) (sum :: [*]) n
+--                  . ( SomeSubsumed2 n choose sum
+--                    )
+--                 => Summed sum
+--                 -> IO ()
+--testSomeSubsumed2 v = case soutj2 @choose @sum v of
+--  Just _ -> putStrLn "found it"
+--  Nothing -> return ()
+--
+--testSomeSubsumed3 :: forall (choose :: (*,*,*)) (sum :: [*])
+--                  . ( SomeSubsumed3 choose sum
+--                    )
+--                 => Summed sum
+--                 -> IO ()
+--testSomeSubsumed3 v = case soutj3 @choose @sum v of
+--  Just _ -> putStrLn "found it"
+--  Nothing -> return ()
 
 testCases :: IO ()
 testCases = do
@@ -266,8 +324,18 @@ testCases = do
   test @'[String] @'[String] @String (Here "asd")
   --wont compile, left is not subsumed by right
   --test @'[String,Int,Float] @'[String,Int] @Int (Elsewhere $ Here 26)
-  testSomeSubsumed1 @String @'[String] (Here "asd")
-  testSomeSubsumed1 @String @'[Int, String] (Elsewhere $ Here "asd")
-  testSomeSubsumed1 @String @'[String, Int] (Here "asd")
-  testSomeSubsumed2 @'(String, Int) @'[String] (Here "asd")
-  testSomeSubsumed2 @'(String, Int) @'[Int] (Here 1)
+--  testSomeSubsumed1 @String @'[String] (Here "asd")
+--  testSomeSubsumed1 @String @'[Int, String] (Elsewhere $ Here "asd")
+--  testSomeSubsumed1 @String @'[String, Int] (Here "asd")
+--  testSomeSubsumed2 @'(String, Int) @'[String] (Here "asd")
+--  testSomeSubsumed2 @'(String, Int) @'[Int] (Here 1)
+--
+--  want to find a float or an int in the larger channel
+--   of int string float
+--   fuck.will find both .. should make a Index 1 and 3 Summed '[Int,Float]
+--  testSomeSubsumed2 @'[Float, Int] @'[Int,String,Float] (Here 1)
+--
+--  want to find a string or an int in the larger channel
+--   of int char float
+--   should find Int at index 1  Summed '[Int]
+  testSomeSubsumed @'[String, Int] @'[Int,Char,Float] (Here 1)
