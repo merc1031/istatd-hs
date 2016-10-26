@@ -1,11 +1,11 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeOperators #-}
 module Istatd.Chan.ChanLike where
 
 import          Control.Monad.IO.Class      ( MonadIO )
@@ -19,17 +19,6 @@ data ChannelException = ChannelBlockedException
 
 instance Exception ChannelException
 
---data Sendable s f = Sendable s
---
---instance (Functor (Sendable s)) where
---  fmap _ (Sendable s) = Sendable s
---
---mkSendable :: s -> Sendable s f
---mkSendable s = Sendable s
---
---unSendable :: Sendable s f -> s
---unSendable (Sendable s) = s
-
 
 -- | `ChanLike` implements an interface for channels that want to talk about
 -- in and out sides. They are associated via a cyclical functional dependency.
@@ -37,7 +26,10 @@ instance Exception ChannelException
 -- may bring the type of the associated other end into scope.
 -- This interface allows the generalized code to not worry about the type of the
 -- specific channel or its underlying concurrency implementation.
-class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*]) | cit as -> cot as, cot as -> cit as where
+class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*])
+  | cit as -> cot as
+  , cot as -> cit as
+  where
   newZChan
     :: MonadIO m
     => m (cit (Summed as), cot (Summed as))

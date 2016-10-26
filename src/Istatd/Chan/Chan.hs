@@ -1,13 +1,13 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeApplications #-}
-{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE TypeOperators #-}
 module Istatd.Chan.Chan where
 
 import            Control.Arrow                           ( (***) )
@@ -38,9 +38,9 @@ instance ChanLike InChanI OutChanI (a :: [*])  where
   newZChan   = iNewZChan
   newBChan   = iNewBChan
   writeChan  = iWriteChan
-  readChanM   = iReadChanM
-  writeRaw  = iWriteRaw
-  readRaw   = iReadRaw
+  readChanM  = iReadChanM
+  writeRaw   = iWriteRaw
+  readRaw    = iReadRaw
   inChanLen  = iInChanLen
   outChanLen = iOutChanLen
 
@@ -61,8 +61,7 @@ instance NFData (OutChanI a) where
   rnf (BOutChan !_ref !_chan) = ()
 
 iWriteRaw
-  :: ( MonadIO m
-     )
+  :: (MonadIO m)
   => InChanI (Summed as)
   -> Summed as
   -> m ()
@@ -72,8 +71,7 @@ iWriteRaw (BInChan c buchan) r =
   liftIO $ handleBlocked $ BU.writeChan buchan (r) >> (modLen c (+))
 
 iReadRaw
-  :: ( MonadIO m
-     )
+  :: (MonadIO m)
   => OutChanI (Summed as)
   -> m (Summed as)
 iReadRaw (ZOutChan uchan) =

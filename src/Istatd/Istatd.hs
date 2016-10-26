@@ -2,17 +2,17 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE IncoherentInstances #-}
-{-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE GADTs #-}
+--{-# LANGUAGE IncoherentInstances #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
-{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# OPTIONS_GHC -fno-warn-unused-matches #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 {-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
@@ -68,7 +68,10 @@ import            Control.Monad.IO.Class              ( MonadIO
                                                       , liftIO
                                                       )
 import            Control.Monad.Trans.Control         ( MonadBaseControl )
+import            Data.Maybe                          ( fromJust )
 import            Data.Monoid                         ( (<>) )
+import            Data.Proxy
+import            IfCxt
 import            Istatd.Chan.ChanLike                ( ChanLike (..)
                                                       , ChannelException (..)
                                                       )
@@ -103,9 +106,7 @@ import            Istatd.Types                        ( IstatdDatum(..)
                                                       , FilterFuncT
                                                       , toPacket
                                                       )
-import Istatd.Simplicity
-import            IfCxt
-import            Data.Proxy
+import            Istatd.Simplicity
 
 import qualified  Control.Concurrent.Chan.Unagi       as U
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
@@ -185,13 +186,6 @@ appendF = (.:>.)
   -> FilterFuncT (ci (Summed next)) (ci (Summed injest)) m
   -- ^ New sink end of the current pipeline chain
 fl .<:. fr = fl >=> fr
--- \y -> (\x -> fl x) (fromJust . outj' . fr $ y)
-
---writeIt :: forall ci c a m (cs :: [* -> *])
---         . ( Sendable a :<: cs
---           )
---        => ci cs -> a -> m ()
---writeIt chan item = writeChan chan $ inj $ mkSendable item
 
 -- | Append a filter in the pipeline.
 -- Synonym for `.:>.`, analagous to `>=>`
@@ -248,17 +242,7 @@ mkFilterDifference
   -> FilterFuncT (ci (Summed bs)) (ci (Summed as)) m
 mkFilterDifference dstate = \out -> do
   (inC, outC) <- newZChan
-  let --action dc = writeChan out =<< computeDifferenceCounter dstate dc
-      --ifDiffCounter :: a -> m ()
-      --ifDiffCounter v = writeChan out =<< (ifCxt (Proxy :: Proxy (DifferenceCounterIsh a))
-      --                                          (computeDifferenceCounter dstate . toDiff)
-      --                                          (\s -> return $ ifCxt (Proxy :: Proxy (IstatdData a))
-      --                                                                toData
-      --                                                                (error "Difference needs to resolve to istatddata")
-      --                                                                s
-      --                                          ) v
-      --                                    )
-      ifDiffCounter ::
+  let ifDiffCounter ::
                     Maybe DifferenceCounter
                     -> m ()
       ifDiffCounter (Just d) = writeChan out =<< computeDifferenceCounter dstate d
@@ -268,55 +252,73 @@ mkFilterDifference dstate = \out -> do
 
 -- | Adds a prefix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterPrefix
-  :: forall as a m ci co
+  :: forall as bs m ci co
    . ( MonadIO m
      , ChanLike ci co as
+     , ChanLike ci co bs
      , MonadBaseControl IO m
-     , '[a] :<<: as
-     , a :<: as
-     , IfCxt (HasKey a)
+     , bs :<<: as
+     , IstatdDatum :<: as
+     , DifferenceCounter :<: as
+     , IstatdDatum :<: bs
+     , DifferenceCounter :<: bs
+--     , '[a] :<<: as
+--     , a :<: as
      )
   => BSLB.Builder
-  -> FilterFuncT (ci (Summed as)) (ci (Summed as)) m
+  -> FilterFuncT (ci (Summed bs)) (ci (Summed as)) m
 mkFilterPrefix prefix = \out -> do
   (inC, outC) <- newZChan
-  let uk :: (HasKey a) => a -> a
+  let uk :: forall a. (HasKey a) => a -> a
       uk r@(getKey -> k) =
         let nk = prefix <> k
         in updateKey r nk
-      ifHasKeyI :: ( IfCxt (HasKey a)
-                   , a :<: as
+      ifHasKeyI :: ( 
+                    IstatdDatum :<: as
+                   , DifferenceCounter :<: as
+                   , IstatdDatum :<: bs
+                   , DifferenceCounter :<: bs
                    ) => Summed as -> m ()
-      ifHasKeyI v = case outj @a v of
-          Just (d) -> writeChan out $ ifCxt (Proxy :: (Proxy (HasKey a))) uk id d
-          Nothing -> writeRaw out v
+      ifHasKeyI v = case (outj @IstatdDatum v, outj @DifferenceCounter v) of
+          (Just (d), _) -> writeChan out $ uk d
+          (_ , Just i) -> writeChan out $ uk i
+          _ -> writeRaw out $ fromJust $ outj' v
   goM_ $ forever $ (ifHasKeyI =<< readRaw outC)
   return inC
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline
 mkFilterSuffix
-  :: forall as a m ci co
+  :: forall as bs m ci co
    . ( MonadIO m
      , ChanLike ci co as
+     , ChanLike ci co bs
      , MonadBaseControl IO m
-     , '[a] :<<: as
-     , a :<: as
-     , IfCxt (HasKey a)
+     , bs :<<: as
+     , IstatdDatum :<: as
+     , DifferenceCounter :<: as
+     , IstatdDatum :<: bs
+     , DifferenceCounter :<: bs
+--     , '[a] :<<: as
+--     , a :<: as
      )
   => BSLB.Builder
-  -> FilterFuncT (ci (Summed as)) (ci (Summed as)) m
+  -> FilterFuncT (ci (Summed bs)) (ci (Summed as)) m
 mkFilterSuffix suffix = \out -> do
   (inC, outC) <- newZChan
-  let uk :: (HasKey a) => a -> a
+  let uk :: forall a. (HasKey a) => a -> a
       uk r@(getKey -> k) =
         let nk = k <> suffix
         in updateKey r nk
-      ifHasKeyI :: ( IfCxt (HasKey a)
-                   , a :<: as
+      ifHasKeyI :: ( 
+                    IstatdDatum :<: as
+                   , DifferenceCounter :<: as
+                   , IstatdDatum :<: bs
+                   , DifferenceCounter :<: bs
                    ) => Summed as -> m ()
-      ifHasKeyI v = case outj @a v of
-          Just (d) -> writeChan out $ ifCxt (Proxy :: (Proxy (HasKey a))) uk id d
-          Nothing -> writeRaw out v
+      ifHasKeyI v = case (outj @IstatdDatum v, outj @DifferenceCounter v) of
+          (Just (d), _) -> writeChan out $ uk d
+          (_ , Just i) -> writeChan out $ uk i
+          _ -> writeRaw out $ fromJust $ outj' v
   goM_ $ forever $ (ifHasKeyI =<< readRaw outC)
   return inC
 
@@ -431,21 +433,17 @@ mkNullRecorder = do
 
 -- | A sink that allows a channel to be passed in and handled elsewhere
 mkPipeRecorder
-  :: forall m ci co as a
+  :: forall m ci co
    . ( MonadCatch m
      , MonadIO m
-     , ChanLike ci co as
      , ChanLike ci co '[IstatdDatum]
-     , a :<: as
-     , IstatdData a
      , MonadBaseControl IO m
      )
   => ci (Summed '[IstatdDatum])
-  -> m (ci (Summed as))
+  -> m (ci (Summed '[IstatdDatum]))
 mkPipeRecorder c = do
   (inC, outC) <- newZChan
-  let 
-      action = goM_ $ forever $ (writeChan c . toData :: a -> m ()) =<< (readChan outC :: m a)
+  let action = goM_ $ forever $ writeRaw c =<< (readRaw outC)
   action `catch` \(_ :: ChannelException) -> putStrLnIO "Recorder died" >> return ()
   return inC
 

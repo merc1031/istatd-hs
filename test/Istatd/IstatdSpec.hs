@@ -1,3 +1,4 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -34,6 +35,7 @@ import            Control.Monad.Trans.Control       ( MonadBaseControl (..)
 import            Data.Proxy
 import            Istatd.Istatd
 import            Istatd.Simplicity
+import            Istatd.Types
 import            Test.Hspec
 
 import qualified  Control.Concurrent.Chan.Unagi     as U
@@ -44,6 +46,9 @@ import qualified  Istatd.Chan.ChanT                 as ChanT
 mkPipeEnvG'
   :: ( MonadIO m
      , MonadCatch m
+     , MonadBaseControl IO m
+     , IstatdData a
+     , a :<: as
      )
   => m ((ChanT.OutChanI (Summed '[IstatdDatum])), ChanT.InChanI (Summed '[IstatdDatum]))
 mkPipeEnvG' = do
@@ -54,6 +59,7 @@ mkPipeEnvG' = do
 mkPipeEnvG
   :: ( MonadIO m
      , MonadCatch m
+     , MonadBaseControl IO m
      )
   => FilterFuncT (ChanT.InChanI (Summed '[IstatdDatum])) (ChanT.InChanI (Summed as)) m
   -> m ((ChanT.OutChanI (Summed '[IstatdDatum])), ChanT.InChanI (Summed as))
