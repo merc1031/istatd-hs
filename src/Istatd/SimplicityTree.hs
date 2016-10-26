@@ -30,6 +30,8 @@ data Nat where
   Succ :: Nat -> Nat
 
 
+infixr 6 :+:
+
 data (f :+: g) = InL f
                | InR g
 
@@ -39,6 +41,7 @@ data (f :+: g) = InL f
 
 data Crumbs = H | L Crumbs | R Crumbs
 data Res = Found Crumbs | NotFound | Ambiguous
+
 
 
 type family Elem e fs :: Res where
@@ -72,13 +75,76 @@ instance (Subsume ('Found p) f r) => Subsume ('Found ('R p)) f (l :+: r) where
   prj' (InR x) = prj' @('Found p) x
   prj' (InL _) = Nothing
 
-type f :<: g = Subsume (Elem f g) f g
+
+data Struc = Sum Struc Struc | Atom Res
+
+type family GetStruc f g :: Struc where
+  GetStruc (f1 :+: f2) g = 'Sum (GetStruc f1 g) (GetStruc f2 g)
+  GetStruc f           g = 'Atom (Elem f g)
+
+
+class Subsume' (s :: Struc) f g where
+  inj'' :: f -> g
+  prj'' :: g -> Maybe f
+
+instance Subsume res f g => Subsume' ('Atom res) f g where
+  inj'' x = inj' @res x
+  prj'' x = prj' @res x
+
+instance (Subsume' s1 f1 g, Subsume' s2 f2 g) => Subsume' ('Sum s1 s2) (f1 :+: f2) g where
+  inj'' (InL x) = inj'' @s1 x
+  inj'' (InR x) = inj'' @s2 x
+  prj'' x = case prj'' @s1 x of
+              Just y -> Just (InL y)
+              Nothing -> case prj'' @s2 x of
+                           Just y -> Just (InR y)
+                           Nothing -> Nothing
+
+type family Or l r :: Bool where
+  Or 'False 'False = 'False
+  Or _ _           = 'True
+
+type family Dupl f l :: Bool where
+  Dupl (f :+: g) l = Dupl f (g ': l)
+  Dupl f         l = Or (Find f l) (Dupl' l)
+
+type family Dupl' l :: Bool where
+  Dupl' (f ': l) = Or (Dupl f l) (Dupl' l)
+  Dupl' '[]      = 'False
+
+type family Find f l :: Bool where
+  Find f (g ': l)    = Or (Find' f g) (Find f l)
+  Find f '[]         = 'False
+
+type family Find' f g :: Bool where
+  Find' f (g1 :+: g2) = Or (Find' f g1) (Find' f g2)
+  Find' f f           = 'True
+  Find' f g           = 'False
+
+infixl 5 :<:
+
+type f :<: g = ( Subsume' (GetStruc f g) f g
+               , NoDupl f (Dupl f '[])
+               , NoDupl g (Dupl g '[])
+               )
+
+class NoDupl f s
+instance NoDupl f 'False
+
+infixl 5 :~:
+
+type f :~: g = (f :<: g, g :<: f)
+
+split :: (f :~: f1 :+: f2) => (f1 -> b) -> (f2 -> b) -> f -> b
+split f1 f2 x = case inj x of
+                  InL y -> f1 y
+                  InR y -> f2 y
 
 inj :: forall f g. (f :<: g) => f -> g
-inj = inj' @(Elem f g)
+inj = inj'' @(GetStruc f g)
 
 prj :: forall f g. (f :<: g) => g -> Maybe f
-prj = prj' @(Elem f g)
+prj = prj'' @(GetStruc f g)
 --test :: forall (sub :: [*]) (sum :: [*]) e
 --      . ( Show e
 --        , SubsumedBy sub sum
