@@ -29,6 +29,11 @@ data Nat where
   Zero :: Nat
   Succ :: Nat -> Nat
 
+--data family Summed' (fs :: [*]) :: *
+--data instance Summed' '[] = SummedNil' Void
+--data instance Summed' (f ': fs) = Here' f
+--                                | Elsewhere' (Summed' fs)
+
 class Summable (fs :: [*]) where
   data Summed fs :: *
 
@@ -55,6 +60,20 @@ instance {-# OVERLAPPABLE #-} Subsume f fs => Subsume f (g ': fs) where
 
   outj (Here _)         = Nothing
   outj (Elsewhere fa)   = outj fa
+
+
+--instance Subsume f (f ': fs) where
+--  inj                 = Here
+--
+--  outj (Here fa)      = Just fa
+--  outj (Elsewhere _)  = Nothing
+--
+--instance {-# OVERLAPPABLE #-} Subsume f fs => Subsume f (g ': fs) where
+--  inj                   = Elsewhere . inj
+--
+--  outj (Here _)         = Nothing
+--  outj (Elsewhere fa)   = outj fa
+
 
 
 
@@ -303,14 +322,14 @@ test v = case ((inj' @(sub) @(sum) $ (v ))) of
     Nothing -> return ()
   Nothing -> return ()
 
-testSomeSubsumed :: forall (choose :: [*]) (sum :: [*])
-                  . ( SomeSubsumed choose sum
-                    )
-                 => Summed sum
-                 -> IO ()
-testSomeSubsumed v = case soutj @choose @sum v of
-  Just _ -> putStrLn "found it"
-  Nothing -> return ()
+--testSomeSubsumed :: forall (choose :: [*]) (sum :: [*])
+--                  . ( SomeSubsumed choose sum
+--                    )
+--                 => Summed sum
+--                 -> IO ()
+--testSomeSubsumed v = case soutj @choose @sum v of
+--  Just _ -> putStrLn "found it"
+--  Nothing -> return ()
 --testSomeSubsumed1 :: forall (choose :: *) (sum :: [*])
 --                  . ( SomeSubsumed1 choose sum
 --                    )
@@ -368,4 +387,4 @@ testCases = do
 --  want to find a string or an int in the larger channel
 --   of int char float
 --   should find Int at index 1  Summed '[Int]
-  testSomeSubsumed @'[String, Int] @'[Int,Char,Float] (Here 1)
+--testSomeSubsumed @'[String, Int] @'[Int,Char,Float] (Here 1)

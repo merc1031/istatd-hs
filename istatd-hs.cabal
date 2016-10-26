@@ -24,6 +24,7 @@ library
                      , Istatd.Client
                      , Istatd.Complexity
                      , Istatd.Simplicity
+                     , Istatd.SimplicityTree
                      , Istatd.Control.Monad
                      , Istatd.Datum.DifferenceCounter
                      , Istatd.Datum.Percentile
