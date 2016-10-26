@@ -25,6 +25,7 @@ library
                      , Istatd.Complexity
                      , Istatd.Simplicity
                      , Istatd.SimplicityTree
+                     , Istatd.SimplicityTreeC
                      , Istatd.Control.Monad
                      , Istatd.Datum.DifferenceCounter
                      , Istatd.Datum.Percentile

@@ -11,7 +11,7 @@ module Istatd.Chan.ChanLike where
 import          Control.Monad.IO.Class      ( MonadIO )
 import          Control.Exception           ( Exception )
 import          Data.Typeable               ( Typeable )
-import Istatd.Simplicity
+import Istatd.SimplicityTreeC
 import Data.Maybe
 
 data ChannelException = ChannelBlockedException
@@ -54,7 +54,7 @@ class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*])
   writeChan
     :: forall a m
      . ( MonadIO m
-       , a :<: as
+       , a :<:: as
        )
     => (cit (Summed as))
     -> a
@@ -63,7 +63,7 @@ class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*])
   readChan
     :: forall a m
      . ( MonadIO m
-       , a :<: as
+       , a :<:: as
        )
     => (cot (Summed as))
     -> m a
@@ -72,7 +72,7 @@ class ChanLike (cit :: * -> *) (cot :: * -> *) (as :: [*])
   readChanM
     :: forall a m
      . ( MonadIO m
-       , a :<: as
+       , a :<:: as
        )
     => (cot (Summed as))
     -> m (Maybe a)
