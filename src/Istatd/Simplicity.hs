@@ -130,36 +130,66 @@ instance ( Summable sub
 -- as pairs of (Nat,Type)   ::   [(Z, a), (S Z, b)]
 -- producing a              ::   Summed larger -> Maybe (Summed '[b])
 --
-class SomeSubsumed (choose :: [*]) (all :: [*]) where
-  soutj :: SomeSubsumed' choose all --Summed all -> Maybe (Summed '[choose])
-
-instance SomeSubsumed c c where
-  soutj = Just . id
-
-type family SomeSubsumed' (choose :: [*]) (all :: [*]) where
---  SomeSubsumed' (c ': choose') (c ': all') = Summed all -> Maybe (Summed '[c])
-  SomeSubsumed' choose choose = Summed choose -> Maybe (Summed choose)
-  SomeSubsumed' choose all = SomeSubsumed'' (ListIdxs choose all) choose all
-
-type family SomeSubsumed'' (ns :: [(Nat, *)]) (choose :: [*]) (all :: [*]) where
-  SomeSubsumed'' ns choose all = Summed all -> Maybe (Summed (Rearrange ns))
-
-type family Rearrange (ns :: [(Nat, *)]) :: [*] where
-  Rearrange '[]                      = '[]
-  Rearrange ( '( 'Zero, a)    ': ns) = Rearrange ns
-  Rearrange ( '( 'Succ s, a)  ': ns) = a ': Rearrange ns
-
---type family ListIdxs (
-type family ListIdxs (cs :: [*]) (ls :: [*]) :: [(Nat, *)] where
-  ListIdxs '[]       ls = '[]
-  ListIdxs (c ': cs) ls = '(ListIdx c ls, c) ': ListIdxs cs ls
-
-type family ListIdx (c :: *) (ls :: [*]) :: Nat where
-  ListIdx c '[]         = 'Zero
-  ListIdx c (c ': cs)   = 'Succ 'Zero
-  ListIdx c (b ': cs)   = 'Succ (ListIdx c cs)
 
 
+
+
+--class SomeSubsumed (choose :: [*]) (all :: [*]) where
+--  soutj :: Summed all -> Maybe (SomeSubsumed' choose all) --Summed all -> Maybe (Summed '[choose])
+--
+--instance SomeSubsumed c c where
+--  soutj = Just . id
+--
+--instance (Within choose all ~ 'True) => SomeSubsumed choose all where
+--  soutj = Just . id
+--
+--type family SomeSubsumed' (choose :: [*]) (all :: [*]) where
+----  SomeSubsumed' (c ': choose') (c ': all') = Summed all -> Maybe (Summed '[c])
+--  SomeSubsumed' choose choose = (Summed choose)
+--  SomeSubsumed' choose all = SomeSubsumed'' (ListIdxsW choose all) choose all
+--
+--type family SomeSubsumed'' (ns :: [(Nat, *)]) (choose :: [*]) (all :: [*]) where
+--  SomeSubsumed'' ns choose all = (Summed (Rearrange ns))
+--
+--type family Rearrange (ns :: [(Nat, *)]) :: [*] where
+--  Rearrange '[]                      = '[]
+--  Rearrange ( '( 'Zero, a)    ': ns) = Rearrange ns
+--  Rearrange ( '( 'Succ s, a)  ': ns) = a ': Rearrange ns
+--
+----type family ListIdxs (
+--type family ListIdxsW (cs :: [*]) (ls :: [*]) :: [(Nat, *)] where
+--  ListIdxsW '[]       ls = '[]
+--  ListIdxsW (c ': cs) ls = '(ListIdx c ls, c) ': ListIdxsW cs ls
+--
+--type family ListIdxs (cs :: [*]) (ls :: [*]) :: [Nat] where
+--  ListIdxs '[]       ls = '[]
+--  ListIdxs (c ': cs) ls = (ListIdx c ls) ': ListIdxs cs ls
+--
+--type family ListIdx (c :: *) (ls :: [*]) :: Nat where
+--  ListIdx c '[]         = 'Zero
+--  ListIdx c (c ': cs)   = 'Succ 'Zero
+--  ListIdx c (b ': cs)   = 'Succ (ListIdx c cs)
+--
+--type family Within choose all where
+--  Within choose all = AllNonZero (ListIdxs choose all)
+--
+--type family AllNonZero  (l :: [Nat]) where
+--  AllNonZero '[]      = 'True
+--  AllNonZero (l ': ls) = (NonZero l) && (AllNonZero ls)
+--
+--type family NonZero n where
+--  NonZero 'Zero = 'False
+--  NonZero ('Succ s) = 'True
+----
+--type family (||) (bl :: Bool) (br :: Bool) :: Bool where
+--  'True || _     = 'True
+--  _     || 'True = 'True
+--  _     || _     = 'False
+--
+--type family (&&) (bl :: Bool) (br :: Bool) :: Bool where
+--  'True && 'True = 'True
+--  _     && _     = 'False
+--
 --class SomeSubsumed1 (choose :: *) (all :: [*]) where
 --  soutj1 :: Summed all -> Maybe (Summed '[choose])
 --
