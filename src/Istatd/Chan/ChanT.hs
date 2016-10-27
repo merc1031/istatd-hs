@@ -30,7 +30,7 @@ import            Control.Monad.IO.Class                  ( MonadIO
 import            Istatd.Chan.ChanLike                    ( ChanLike (..)
                                                           , ChannelException (..)
                                                           )
-import            Istatd.SimplicityTreeC
+import            Istatd.Simplicity
 
 import qualified  Control.Concurrent.Chan.Unagi           as U
 import qualified  Control.Concurrent.Chan.Unagi.Bounded   as BU

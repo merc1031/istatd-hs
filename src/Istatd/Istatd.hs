@@ -70,7 +70,7 @@ import            Control.Monad.IO.Class              ( MonadIO
 import            Control.Monad.Trans.Control         ( MonadBaseControl )
 import            Data.Maybe                          ( fromJust )
 import            Data.Monoid                         ( (<>) )
-import            Data.Proxy
+--import            Data.Proxy
 import            IfCxt
 import            Istatd.Chan.ChanLike                ( ChanLike (..)
                                                       , ChannelException (..)
@@ -99,7 +99,7 @@ import            Istatd.Monad.Types                  ( runAppM
                                                       )
 import            Istatd.Class.Time                   ( SupportsTime (..) )
 import            Istatd.Types                        ( IstatdDatum(..)
-                                                      , IstatdData (..)
+--                                                      , IstatdData (..)
                                                       , IstatdType (..)
                                                       , HasKey (..)
                                                       , FilterFunc
@@ -257,11 +257,11 @@ mkFilterPrefix
      , ChanLike ci co as
      , ChanLike ci co bs
      , MonadBaseControl IO m
-     , bs :<<: as
-     , IstatdDatum :<: as
-     , DifferenceCounter :<: as
-     , IstatdDatum :<: bs
-     , DifferenceCounter :<: bs
+     , bs :~: as
+--     , IstatdDatum :<: as
+--     , DifferenceCounter :<: as
+--     , IstatdDatum :<: bs
+--     , DifferenceCounter :<: bs
 --     , '[a] :<<: as
 --     , a :<: as
      )
@@ -273,17 +273,17 @@ mkFilterPrefix prefix = \out -> do
       uk r@(getKey -> k) =
         let nk = prefix <> k
         in updateKey r nk
-      ifHasKeyI :: ( 
-                    IstatdDatum :<: as
-                   , DifferenceCounter :<: as
-                   , IstatdDatum :<: bs
-                   , DifferenceCounter :<: bs
+      ifHasKeyI :: ( IfCxt (IstatdDatum :<: as)
+                   , IfCxt (IstatdDatum :<: bs)
                    ) => Summed as -> m ()
-      ifHasKeyI v = case (outj @IstatdDatum v, outj @DifferenceCounter v) of
-          (Just (d), _) -> writeChan out $ uk d
-          (_ , Just i) -> writeChan out $ uk i
-          _ -> writeRaw out $ fromJust $ outj' v
-  goM_ $ forever $ (ifHasKeyI =<< readRaw outC)
+      ifHasKeyI v = case outj @IstatdDatum v of
+          Just d -> writeChan out $ uk d
+          Nothing -> return ()
+      ifHasKeyD v = case outj @DifferenceCounter v of
+          Just i -> writeChan out $ uk i
+          Nothing -> return ()
+      ifHas v = writeRaw out $ fromJust $ outj' v
+  goM_ $ forever $ ((\x -> ifHasKeyI x >> ifHasKeyD x >> ifHas x) =<< readRaw outC)
   return inC
 
 -- | Adds a suffix to the key of any `IstatdDatum` that passes through the pipeline

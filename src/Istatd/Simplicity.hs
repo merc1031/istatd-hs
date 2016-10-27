@@ -138,6 +138,8 @@ instance ( Summable sub
          , SubsumedBy sub sum
          ) => (sub :<<: sum)
 
+type as :~: bs = (as :<<: bs, bs :<<: as)
+
 -- Algorithm for finding the proper Summed conversions type
 -- find small               ::   [a,b]
 -- in   larger              ::   [b,c,a]
