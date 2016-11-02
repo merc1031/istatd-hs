@@ -82,11 +82,12 @@ import            Istatd.Monad.Types                  ( runAppM
                                                       , State (..)
                                                       )
 import            Istatd.Class.Time                   ( SupportsTime (..) )
-import            Istatd.Types                        ( IstatdDatum(..)
-                                                      , IstatdType (..)
-                                                      , HasKey (..)
+import            Istatd.Types                        ( HasKey (..)
                                                       , FilterFunc
                                                       , FilterFuncT
+                                                      )
+import            Istatd.Datum.Types                  ( IstatdDatum (..)
+                                                      , Counter (..)
                                                       , toPacket
                                                       )
 

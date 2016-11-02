@@ -20,8 +20,7 @@ import            Control.Monad.IO.Class          ( MonadIO
 import            Data.Maybe                      ( catMaybes )
 import            Data.Monoid                     ( (<>) )
 import            Istatd.Class.Time               ( SupportsTime (..) )
-import            Istatd.Types                    ( IstatdDatum (..)
-                                                  , IstatdType (..)
+import            Istatd.Datum.Types              ( IstatdDatum (..)
                                                   )
 
 import qualified  Data.ByteString.Lazy            as BSLC

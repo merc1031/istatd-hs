@@ -1,8 +1,9 @@
+{-# LANGUAGE RecordWildCards #-}
 module Istatd.Datum.DifferenceCounter
-( DifferenceCounter (..)
-, DifferenceState (..)
+( DifferenceState (..)
 , mkDifferenceState
 , computeDifferenceCounter
+, mkDifferenceCounter
 )
 where
 
@@ -10,9 +11,8 @@ import            Control.Concurrent.STM
 import            Control.Monad.IO.Class              ( MonadIO
                                                       , liftIO
                                                       )
-import            Istatd.Types                        ( IstatdDatum (..)
-                                                      , IstatdType (..)
-                                                      , HasKey (..)
+import            Istatd.Datum.Types                  ( IstatdDatum (..)
+                                                      , Counter (..)
                                                       )
 
 import qualified  Data.ByteString.Lazy.Builder        as BSLB
@@ -20,12 +20,16 @@ import qualified  Data.ByteString.Lazy.Char8          as BSLC
 import qualified  Data.HashMap.Strict                 as HM
 import qualified  Data.Time.Clock.POSIX               as POSIX
 
-instance HasKey DifferenceCounter where
-  getKey (DifferenceCounter k _ _) = BSLB.lazyByteString k
-  updateKey (DifferenceCounter _k t v) k = DifferenceCounter (BSLB.toLazyByteString k) t v
-
-data DifferenceCounter  = DifferenceCounter !BSLC.ByteString !POSIX.POSIXTime !Double
+--data DifferenceCounter  = DifferenceCounter !BSLC.ByteString !POSIX.POSIXTime !Double
 newtype DifferenceState = DifferenceState (TVar (HM.HashMap BSLC.ByteString Double))
+
+mkDifferenceCounter state k v =
+  let a = IstatdDatum { _getKey = k
+                      , _getKeyC = BSLB.toLazyByteString k
+                      , _updateKey = \nk -> a { _getKey = nk, _getKeyC = BSLB.toLazyByteString nk }
+                      , _compute = computeDifferenceCounter state a
+                      }
+  in a
 
 mkDifferenceState
   :: MonadIO m
@@ -36,9 +40,9 @@ mkDifferenceState =
 computeDifferenceCounter
   :: MonadIO m
   => DifferenceState
-  -> DifferenceCounter
-  -> m IstatdDatum
-computeDifferenceCounter (DifferenceState stateV) (DifferenceCounter k t v) = do
+  -> IstatdDatum
+  -> m Counter
+computeDifferenceCounter (DifferenceState stateV) (IstatdDatum {..}) = do
   v' <- liftIO $ atomically $ do
     oldH <- readTVar stateV
     let diff = case HM.lookup k oldH of
@@ -46,4 +50,4 @@ computeDifferenceCounter (DifferenceState stateV) (DifferenceCounter k t v) = do
           Nothing -> 0
     modifyTVar' stateV (\h -> HM.insert k v h)
     return diff
-  return $ IstatdDatum Counter (BSLB.lazyByteString k) t v'
+  return $ Counter (BSLB.lazyByteString k) t v'

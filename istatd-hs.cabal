@@ -25,6 +25,7 @@ library
                      , Istatd.Control.Monad
                      , Istatd.Datum.DifferenceCounter
                      , Istatd.Datum.Percentile
+                     , Istatd.Datum.Types
                      , Istatd.Istatd
                      , Istatd.Monad.Types
                      , Istatd.Tick
