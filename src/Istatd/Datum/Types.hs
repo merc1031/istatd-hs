@@ -1,10 +1,14 @@
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE RankNTypes #-}
 module Istatd.Datum.Types
 ( IstatdDatum (..)
 , Counter (..)
 , encode
 , toPacket
+, getKey
+, updateKey
+, compute
 )
 where
 
@@ -31,11 +35,29 @@ data IstatdDatum = IstatdDatum
   { _getKey :: BSLB.Builder
   , _getKeyC :: BSLC.ByteString
   , _updateKey :: BSLB.Builder -> IstatdDatum
-  , _compute :: forall m. Monad m => m IstatdDatum
+  , _compute :: forall m. m Counter
+  , _getTime :: POSIX.POSIXTime
   , _getValue :: Double
   }
 
+mkCounter k v =
+  let a@(IstatdDatum {..})= IstatdDatum { _getKey = k
+                                        , _getKeyC = BSLB.toLazyByteString k
+                                        , _updateKey = \nk -> a { _getKey = nk, _getKeyC = BSLB.toLazyByteString nk }
+                                        , _compute = return $ Counter _getKey _getTime _getValue
+                                        , _getTime = 0
+                                        , _getValue = v
+                                        }
+  in a
 
+getKey :: IstatdDatum -> BSLB.Builder
+getKey (IstatdDatum {..}) = _getKey
+
+updateKey :: IstatdDatum -> BSLB.Builder -> IstatdDatum
+updateKey (IstatdDatum {..}) key = _updateKey key
+
+compute :: IstatdDatum -> m Counter
+compute IstatdDatum {..} = _compute
 
 instance Show Counter where
   show (Counter k t d) =
